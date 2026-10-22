@@ -159,6 +159,119 @@
     else console.log("[grounds_reserve.js]", rawText);
   }
 
+  // Single source of truth for the "search term is too short" warning.
+  function warnSearchTooShort(value) {
+    const min = MIN_SEARCH_LENGTH;
+    const len = String(value || "").trim().length;
+    notify(
+      "warning",
+      `Please enter at least ${min} characters to search — ` +
+        `you've only typed ${len}.`,
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Search clear button
+  // ------------------------------------------------------------------
+  function injectSearchClearStyles() {
+    if (document.getElementById("groundsReserveSearchStyles")) return;
+    const style = document.createElement("style");
+    style.id = "groundsReserveSearchStyles";
+    style.textContent = `
+      .pmSearchClearBtn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        margin: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #9ca3af;
+        font-size: 11px;
+        line-height: 1;
+        cursor: pointer;
+        z-index: 5;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .pmSearchClearBtn:hover {
+        background: #f3f4f6;
+        color: #4b5563;
+      }
+      .pmSearchClearBtn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30);
+      }
+      .pmSearchClearBtn.is-visible {
+        display: inline-flex;
+      }
+      .pmSearchInputWithClear::-webkit-search-cancel-button,
+      .pmSearchInputWithClear::-webkit-search-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  let searchClearBtn = null;
+
+  function setupSearchClearButton() {
+    const input = els.searchInput;
+    if (!input) return;
+
+    const parent = input.parentElement;
+    if (!parent) return;
+
+    // The button is positioned absolutely inside the input's wrapper,
+    // so the wrapper must establish a positioning context.
+    if (window.getComputedStyle(parent).position === "static") {
+      parent.style.position = "relative";
+    }
+
+    // Reserve room so typed text never slides under the clear button.
+    input.style.paddingRight = "30px";
+    input.classList.add("pmSearchInputWithClear");
+
+    // Idempotent: avoid duplicating the button.
+    const existing = parent.querySelector(".pmSearchClearBtn");
+    if (existing) existing.remove();
+
+    searchClearBtn = document.createElement("button");
+    searchClearBtn.type = "button";
+    searchClearBtn.className = "pmSearchClearBtn";
+    searchClearBtn.setAttribute("aria-label", "Clear search");
+    searchClearBtn.title = "Clear search";
+    searchClearBtn.innerHTML = '<i class="fas fa-times"></i>';
+
+    const updateVisibility = () => {
+      searchClearBtn.classList.toggle("is-visible", input.value.length > 0);
+    };
+
+    searchClearBtn.addEventListener("click", () => {
+      const hadSearch = state.search !== "";
+      input.value = "";
+      updateVisibility();
+      if (hadSearch) {
+        state.search = "";
+        state.page = 1;
+        fetchSpaces();
+      }
+      input.focus();
+    });
+
+    input.addEventListener("input", updateVisibility);
+
+    parent.appendChild(searchClearBtn);
+    updateVisibility();
+  }
+
   // ------------------------------------------------------------------
   // Loading / empty / error states
   // ------------------------------------------------------------------
@@ -386,6 +499,8 @@
           return;
         }
 
+        // Live typing never triggers the "too short" warning — that only
+        // fires on Enter / Filter. Here we silently skip short input.
         if (value.length < MIN_SEARCH_LENGTH) return;
         if (value === state.search) return;
 
@@ -403,11 +518,7 @@
       const value = els.searchInput.value.trim();
 
       if (value.length > 0 && value.length < MIN_SEARCH_LENGTH) {
-        notify(
-          "warning",
-          `Please enter at least ${MIN_SEARCH_LENGTH} characters to search — ` +
-            `you've only typed ${value.length}.`,
-        );
+        warnSearchTooShort(value);
         return;
       }
 
@@ -424,9 +535,15 @@
 
       if (els.searchInput) {
         const value = els.searchInput.value.trim();
-        if (value.length === 0 || value.length >= MIN_SEARCH_LENGTH) {
-          state.search = value;
+
+        // Filter is an explicit action too. If the term is non-empty but
+        // too short, warn and abort — don't silently apply the old term.
+        if (value.length > 0 && value.length < MIN_SEARCH_LENGTH) {
+          warnSearchTooShort(value);
+          return;
         }
+
+        state.search = value;
       }
       if (els.statusFilter) {
         state.status = els.statusFilter.value || "all";
@@ -447,6 +564,8 @@
   // ------------------------------------------------------------------
   // Boot
   // ------------------------------------------------------------------
+  injectSearchClearStyles();
+  setupSearchClearButton();
   if (els.noData) els.noData.style.display = "none";
   fetchSpaces();
 })();

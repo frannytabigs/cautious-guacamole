@@ -313,6 +313,48 @@
       .pmProofCopyBtn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25); }
       .pmProofCopyBtn.is-copied { color: #16a34a; border-color: #bbf7d0; background: #f0fdf4; }
       @media (max-width: 480px) { .pmRemarksHeader { padding: 14px 16px; } .pmRemarksBody { padding: 14px 16px 18px; } .pmRemarksCard, .pmProofCard { max-width: 100%; } .pmProofHeader { padding: 12px 14px; } .pmProofUrlRow { padding: 10px 12px; flex-wrap: wrap; } .pmProofImageWrap img { max-height: 50vh; } }
+
+      /* ============================================================
+         Search clear button
+         ============================================================ */
+      .pmSearchClearBtn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        margin: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        color: #9ca3af;
+        font-size: 11px;
+        line-height: 1;
+        cursor: pointer;
+        z-index: 5;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .pmSearchClearBtn:hover {
+        background: #f3f4f6;
+        color: #4b5563;
+      }
+      .pmSearchClearBtn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30);
+      }
+      .pmSearchClearBtn.is-visible {
+        display: inline-flex;
+      }
+      .pmSearchInputWithClear::-webkit-search-cancel-button,
+      .pmSearchInputWithClear::-webkit-search-decoration {
+        -webkit-appearance: none;
+        appearance: none;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -625,6 +667,9 @@
     state.page = 1;
     state.search = "";
     if (el.search) el.search.value = "";
+    // Hide the clear button since the input was cleared programmatically
+    const clearBtn = document.querySelector(".pmSearchClearBtn");
+    if (clearBtn) clearBtn.classList.remove("is-visible");
     updateTabUI();
     loadTab();
   }
@@ -1268,6 +1313,61 @@
     }, 60);
   }
 
+  // ------------------------------------------------------------------ search clear button
+  function setupSearchClearButton() {
+    const input = el.search;
+    if (!input) return;
+
+    const parent = input.parentElement;
+    if (!parent) return;
+
+    // The button is positioned absolutely inside the input's wrapper,
+    // so the wrapper must establish a positioning context.
+    if (window.getComputedStyle(parent).position === "static") {
+      parent.style.position = "relative";
+    }
+
+    // Reserve room so typed text never slides under the clear button.
+    input.style.paddingRight = "30px";
+    input.classList.add("pmSearchInputWithClear");
+
+    // Avoid duplicating the button if init runs more than once.
+    const existing = parent.querySelector(".pmSearchClearBtn");
+    if (existing) existing.remove();
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "pmSearchClearBtn";
+    clearBtn.setAttribute("aria-label", "Clear search");
+    clearBtn.title = "Clear search";
+    clearBtn.innerHTML = '<i class="fas fa-times"></i>';
+
+    const updateVisibility = () => {
+      if (input.value.length > 0) {
+        clearBtn.classList.add("is-visible");
+      } else {
+        clearBtn.classList.remove("is-visible");
+      }
+    };
+
+    clearBtn.addEventListener("click", () => {
+      input.value = "";
+      updateVisibility();
+
+      const hadSearch = state.search !== "";
+      state.search = "";
+      state.page = 1;
+      if (hadSearch) loadTab();
+
+      input.focus();
+    });
+
+    input.addEventListener("input", updateVisibility);
+
+    parent.appendChild(clearBtn);
+    updateVisibility();
+  }
+
   let eventsBound = false;
   function bindEvents() {
     if (eventsBound) return;
@@ -1281,6 +1381,8 @@
         "input",
         debounce(() => {
           const v = el.search.value.trim();
+          // Live typing never triggers the "too short" warning — that
+          // only fires on Enter. Here we just skip short input.
           if (v.length > 0 && v.length < SEARCH_MIN_LEN) return;
           if (v === state.search) return;
           state.search = v;
@@ -1294,12 +1396,7 @@
         e.preventDefault();
         const v = el.search.value.trim();
         if (v.length > 0 && v.length < SEARCH_MIN_LEN)
-          return notify(
-            "Please enter at least " +
-              SEARCH_MIN_LEN +
-              " characters to search.",
-            "warning",
-          );
+          return notify("Too short to search", "warning");
         state.search = v;
         state.page = 1;
         loadTab();
@@ -1391,6 +1488,7 @@
 
   function start() {
     injectStyles();
+    setupSearchClearButton();
     bindEvents();
     updateTabUI();
     loadTab();

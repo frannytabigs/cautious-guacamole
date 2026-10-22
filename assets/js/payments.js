@@ -990,6 +990,48 @@
                 .pmProofUrlRow         { padding: 10px 12px; flex-wrap: wrap; }
                 .pmProofImageWrap img  { max-height: 50vh; }
             }
+
+            /* ============================================================
+               Search clear button
+               ============================================================ */
+            .pmSearchClearBtn {
+                position: absolute;
+                right: 8px;
+                top: 50%;
+                transform: translateY(-50%);
+                display: none;
+                align-items: center;
+                justify-content: center;
+                width: 24px;
+                height: 24px;
+                padding: 0;
+                margin: 0;
+                border: none;
+                border-radius: 50%;
+                background: transparent;
+                color: #9ca3af;
+                font-size: 11px;
+                line-height: 1;
+                cursor: pointer;
+                z-index: 5;
+                transition: background 0.15s ease, color 0.15s ease;
+            }
+            .pmSearchClearBtn:hover {
+                background: #f3f4f6;
+                color: #4b5563;
+            }
+            .pmSearchClearBtn:focus-visible {
+                outline: none;
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30);
+            }
+            .pmSearchClearBtn.is-visible {
+                display: inline-flex;
+            }
+            .pmSearchInputWithClear::-webkit-search-cancel-button,
+            .pmSearchInputWithClear::-webkit-search-decoration {
+                -webkit-appearance: none;
+                appearance: none;
+            }
         `;
     document.head.appendChild(style);
   }
@@ -2056,6 +2098,57 @@
     }
   }
 
+  // ------------------------------------------------------------------ search clear button
+  function setupSearchClearButton() {
+    const input = el.search;
+    if (!input) return;
+
+    const parent = input.parentElement;
+    if (!parent) return;
+
+    // The button is positioned absolutely inside the input's wrapper,
+    // so the wrapper must establish a positioning context.
+    if (window.getComputedStyle(parent).position === "static") {
+      parent.style.position = "relative";
+    }
+
+    // Reserve room so typed text never slides under the clear button.
+    input.style.paddingRight = "30px";
+    input.classList.add("pmSearchInputWithClear");
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "pmSearchClearBtn";
+    clearBtn.setAttribute("aria-label", "Clear search");
+    clearBtn.title = "Clear search";
+    clearBtn.innerHTML = '<i class="fas fa-times"></i>';
+
+    const updateVisibility = () => {
+      if (input.value.length > 0) {
+        clearBtn.classList.add("is-visible");
+      } else {
+        clearBtn.classList.remove("is-visible");
+      }
+    };
+
+    clearBtn.addEventListener("click", () => {
+      input.value = "";
+      updateVisibility();
+
+      const hadSearch = state.search !== "";
+      state.search = "";
+      state.page = 1;
+      if (hadSearch) loadPayments();
+
+      input.focus();
+    });
+
+    input.addEventListener("input", updateVisibility);
+
+    parent.appendChild(clearBtn);
+    updateVisibility();
+  }
+
   // ------------------------------------------------------------------ events
   let eventsBound = false;
 
@@ -2068,6 +2161,8 @@
         "input",
         debounce((e) => {
           const v = e.target.value.trim();
+          // Live typing never triggers the "too short" warning — that
+          // only fires on Enter / Filter. Here we just skip short input.
           if (v.length > 0 && v.length < SEARCH_MIN_LEN) return;
           if (v === state.search) return;
           state.search = v;
@@ -2080,7 +2175,10 @@
         if (e.key === "Enter") {
           e.preventDefault();
           const v = el.search.value.trim();
-          if (v.length > 0 && v.length < SEARCH_MIN_LEN) return;
+          if (v.length > 0 && v.length < SEARCH_MIN_LEN) {
+            notify("Too short to search", "warning");
+            return;
+          }
           state.search = v;
           state.page = 1;
           loadPayments();
@@ -2098,7 +2196,14 @@
 
     if (el.filterBtn) {
       el.filterBtn.addEventListener("click", () => {
-        if (el.search) state.search = el.search.value.trim();
+        if (el.search) {
+          const v = el.search.value.trim();
+          if (v.length > 0 && v.length < SEARCH_MIN_LEN) {
+            notify("Too short to search", "warning");
+            return;
+          }
+          state.search = v;
+        }
         if (el.statusFilter) state.status = el.statusFilter.value || "all";
         state.page = 1;
         loadPayments();
@@ -2215,6 +2320,7 @@
     }
     injectStyles();
     hideNoData();
+    setupSearchClearButton();
     bindEvents();
     loadPayments();
   }
