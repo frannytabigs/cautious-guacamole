@@ -268,7 +268,10 @@ class ImageManager
                 if ($file === '.' || $file === '..') {
                     continue;
                 }
-
+                // Skip lock files (created by acquireLock for concurrency safety)
+                if (substr($file, -5) === '.lock') {
+                    continue;
+                }
                 if (stripos($file, $searchTerm) !== false) {
                     $files[] = $file;
 
@@ -305,6 +308,10 @@ class ImageManager
         } else {
             foreach ($allFiles as $file) {
                 if ($file === '.' || $file === '..') {
+                    continue;
+                }
+                // Skip lock files (created by acquireLock for concurrency safety)
+                if (substr($file, -5) === '.lock') {
                     continue;
                 }
                 if (is_file($this->uploadDir . $file)) {

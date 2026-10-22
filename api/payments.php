@@ -6,7 +6,18 @@
  * GET    : List all payments (paginated, role‑filtered) or fetch one by ID
  * POST   : Create a new payment (public, requires image upload)
  * PUT    : Confirm/unconfirm office/grounds, edit details, or edit a single remark
- * DELETE : Soft‑delete a payment (admin/office only)
+ * DELETE : Soft‑delete a payment (ADMIN ONLY)
+ *
+ * Role rules:
+ *   - Admin  : can confirm/unconfirm BOTH office & grounds, but STILL follows
+ *              the order: office first → then grounds. To fully confirm, tap
+ *              twice (office, then grounds). To fully unconfirm, tap twice
+ *              (grounds, then office). Can edit any remark, can soft-delete.
+ *   - Office : can confirm/unconfirm OFFICE only (unconfirm is blocked while
+ *              grounds is still confirmed). Can add/edit OFFICE remarks only.
+ *   - Grounds: can confirm GROUNDS only (requires office confirmed first),
+ *              can unconfirm GROUNDS, can add/edit GROUNDS remarks only.
+ *   - Payer remarks are read-only via this API.
  */
 
 define('ITS_ME_JUSTTOVERIFY', true);
@@ -32,12 +43,10 @@ $isStaff   = in_array($role, [ROLE_ADMIN, ROLE_OFFICE, ROLE_GROUNDS]);
 // -----------------------------------------------------------------------------
 $method = $_SERVER['REQUEST_METHOD'] ?? null;
 
-// Parse path: /payments/{id} or /payments
 $pathInfo   = $_GET['path_info'] ?? $_SERVER['PATH_INFO'] ?? '';
 $pathParts  = array_filter(explode('/', trim($pathInfo, '/')));
-$resourceId = array_shift($pathParts); // numeric ID or empty
+$resourceId = array_shift($pathParts);
 
-// Merge input sources (JSON + form)
 $input = array_merge(
     json_decode(file_get_contents('php://input'), true) ?: [],
     $_POST ?? []
@@ -49,7 +58,6 @@ $imageManager = new ImageManager();
 // 3. Helper Functions
 // -----------------------------------------------------------------------------
 
-/** Require a specific role, else respond with 403 */
 function requireRole($allowedRoles, $userRole)
 {
     if (!is_array($allowedRoles)) {
@@ -60,7 +68,6 @@ function requireRole($allowedRoles, $userRole)
     }
 }
 
-/** Format and validate Philippine phone number (assumes formatPhNumber exists) */
 function validatePhone($phone)
 {
     $formatted = formatPhNumber($phone);
@@ -70,7 +77,6 @@ function validatePhone($phone)
     return $formatted;
 }
 
-/** Build the base SELECT query for payments, including staff names */
 function getPaymentSelectSQL()
 {
     return "
@@ -98,7 +104,6 @@ function getPaymentSelectSQL()
     ";
 }
 
-/** Format a single payment row into a flat structure */
 function formatPayment($row)
 {
     $status = 'Pending Office';
@@ -141,12 +146,10 @@ try {
 
         // ---------- GET ----------
         case 'GET':
-            // Only staff can view payments (no role-filtering on the data itself)
             if (!$isStaff) {
                 Response::error('Forbidden. You do not have access to view payment records.', 403);
             }
 
-            // ---- Single record ----
             if (is_numeric($resourceId)) {
                 $sql = getPaymentSelectSQL() . ' WHERE p.payment_id = ? AND p.deleted_at IS NULL LIMIT 1';
                 $stmt = $pdo->prepare($sql);
@@ -158,7 +161,6 @@ try {
                 Response::success('Payment retrieved', formatPayment($row));
             }
 
-            // ---- Inputs ----
             $searchTerm = isset($_GET['search_term']) ? trim((string) $_GET['search_term']) : '';
             if ($searchTerm !== '' && mb_strlen($searchTerm) < 3) {
                 Response::error("Search term must be at least 3 characters long", 400);
@@ -167,7 +169,6 @@ try {
             $limit = max(1, min((int) ($_GET['limit'] ?? 100), 500));
             $page  = max(1, (int) ($_GET['page'] ?? 1));
 
-            // ---- Status filter (pending_office | pending_grounds | verified) ----
             $statusRaw = $_GET['status'] ?? '';
             if (is_array($statusRaw)) {
                 $statusRaw = implode(',', $statusRaw);
@@ -188,11 +189,9 @@ try {
                 }
             }
 
-            // ---- Build WHERE + params ----
             $where  = 'p.deleted_at IS NULL';
             $params = [];
 
-            // Status clause (OR across wanted statuses)
             if (!empty($wantedStatuses)) {
                 $statusParts = [];
                 foreach ($wantedStatuses as $s) {
@@ -207,7 +206,6 @@ try {
                 $where .= ' AND (' . implode(' OR ', $statusParts) . ')';
             }
 
-            // Search clause (includes staff names via u1/u2)
             if ($searchTerm !== '') {
                 $like = '%' . $searchTerm . '%';
                 $searchCols = [
@@ -232,7 +230,6 @@ try {
                 $where .= ' AND (' . implode(' OR ', $parts) . ')';
             }
 
-            // ---- COUNT (mirrors the page query's joins so search on u1/u2 works) ----
             $countSql = "
                 SELECT COUNT(*)
                 FROM payments p
@@ -248,7 +245,6 @@ try {
             $page       = min($page, max(1, $totalPages));
             $offset     = ($page - 1) * $limit;
 
-            // ---- Order: Pending Office (0) → Pending Grounds (1) → Verified (2), newest first within group ----
             $orderSql = "
                 ORDER BY
                     CASE
@@ -259,7 +255,6 @@ try {
                     p.payment_id DESC
             ";
 
-            // $limit / $offset are strict ints at this point → safe to interpolate.
             $sql = getPaymentSelectSQL() . " WHERE $where $orderSql LIMIT $limit OFFSET $offset";
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
@@ -274,7 +269,6 @@ try {
                 'total_pages'   => $totalPages,
             ];
 
-            // ---- Response ----
             $payload = [
                 'pagination' => $pagination,
                 'payments'   => $payments,
@@ -291,7 +285,6 @@ try {
 
         // ---------- POST ----------
         case 'POST':
-            // Anyone can submit (no authentication needed)
             $required = [
                 'reference_number',
                 'payment_channel',
@@ -340,7 +333,6 @@ try {
             $filename  = $uploadResult['filename'];
 
             try {
-                // Public insert: created_by / updated_by remain NULL (default)
                 $stmt = $pdo->prepare("
                     INSERT INTO payments 
                         (reference_number, payment_channel, amount, purpose,
@@ -385,7 +377,6 @@ try {
             $action = $input['action'] ?? 'edit_details';
             $userId = $userData['user_id'];
 
-            // Helper to check if payment exists and is not deleted (for all actions)
             $existsStmt = $pdo->prepare("SELECT 1 FROM payments WHERE payment_id = ? AND deleted_at IS NULL");
             $existsStmt->execute([$resourceId]);
             if (!$existsStmt->fetch()) {
@@ -393,8 +384,13 @@ try {
             }
 
             switch ($action) {
+
+                // -------------------------------------------------------------
+                // OFFICE verification — admin or office.
+                // -------------------------------------------------------------
                 case 'confirm_office':
                     requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
+
                     $stmt = $pdo->prepare("
                         UPDATE payments 
                         SET confirmed_office_staff = ?, 
@@ -407,17 +403,26 @@ try {
                     Response::success('Payment confirmed by Office.');
                     break;
 
+                // -------------------------------------------------------------
+                // OFFICE unconfirm — admin or office.
+                // Blocked if grounds already confirmed, for EVERYONE (incl. admin).
+                // To fully undo, admin must unconfirm grounds first, then office.
+                // -------------------------------------------------------------
                 case 'unconfirm_office':
                     requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
-                    // Check if grounds already confirmed
+
                     $check = $pdo->prepare("
                         SELECT confirmed_ground_staff FROM payments 
                         WHERE payment_id = ? AND deleted_at IS NULL
                     ");
                     $check->execute([$resourceId]);
                     if ($check->fetchColumn()) {
-                        Response::error('Cannot unconfirm: Grounds staff has already completed work.', 409);
+                        Response::error(
+                            'Cannot unconfirm office: grounds staff has already completed work. Unconfirm grounds first.',
+                            409
+                        );
                     }
+
                     $stmt = $pdo->prepare("
                         UPDATE payments 
                         SET confirmed_office_staff = NULL,
@@ -429,16 +434,25 @@ try {
                     Response::success('Payment confirmation reverted.');
                     break;
 
+                // -------------------------------------------------------------
+                // GROUNDS verification — admin or grounds.
+                // Office must be confirmed FIRST — for EVERYONE (incl. admin).
+                // -------------------------------------------------------------
                 case 'confirm_grounds':
                     requireRole([ROLE_ADMIN, ROLE_GROUNDS], $role);
+
                     $check = $pdo->prepare("
                         SELECT confirmed_office_staff FROM payments 
                         WHERE payment_id = ? AND deleted_at IS NULL
                     ");
                     $check->execute([$resourceId]);
                     if (!$check->fetchColumn()) {
-                        Response::error('Cannot complete ground work: Payment not confirmed by office yet.', 400);
+                        Response::error(
+                            'Cannot complete ground work: Payment not confirmed by office yet. Confirm office first.',
+                            400
+                        );
                     }
+
                     $stmt = $pdo->prepare("
                         UPDATE payments 
                         SET confirmed_ground_staff = ?, 
@@ -451,8 +465,12 @@ try {
                     Response::success('Work completion confirmed by Grounds.');
                     break;
 
+                // -------------------------------------------------------------
+                // GROUNDS unconfirm — admin or grounds.
+                // -------------------------------------------------------------
                 case 'unconfirm_grounds':
                     requireRole([ROLE_ADMIN, ROLE_GROUNDS], $role);
+
                     $stmt = $pdo->prepare("
                         UPDATE payments 
                         SET confirmed_ground_staff = NULL,
@@ -464,16 +482,16 @@ try {
                     Response::success('Ground work confirmation reverted.');
                     break;
 
+                // -------------------------------------------------------------
+                // REMARK edit — per-department.
+                //   Office  → may only edit OFFICE remarks.
+                //   Grounds → may only edit GROUNDS remarks.
+                //   Admin   → may edit any (office / grounds / admin).
+                //   Payer remarks are read-only.
+                // -------------------------------------------------------------
                 case 'edit_remark':
-                    // ---------------------------------------------------------
-                    // Save a single remark (Payer / Office / Grounds / Admin).
-                    // Only the targeted column is written; other remarks are
-                    // left untouched.
-                    // ---------------------------------------------------------
                     $remarkType = strtolower(trim((string) ($input['remark_type'] ?? '')));
 
-                    // Whitelist of editable remark types → DB columns.
-                    // (Payer is intentionally NOT in this list — it's read-only.)
                     $columnMap = [
                         'office'  => 'remarks_office',
                         'grounds' => 'remarks_grounds',
@@ -487,7 +505,6 @@ try {
                         Response::error('Invalid remark type.', 400);
                     }
 
-                    // Role gate per department (backend enforcement; UI is only a hint).
                     if ($remarkType === 'office') {
                         requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
                     } elseif ($remarkType === 'grounds') {
@@ -501,11 +518,8 @@ try {
                         Response::error('Remark is too long (max 2000 characters).', 400);
                     }
 
-                    // Store empty as NULL so the UI shows "+ Add remark" again.
                     $dbValue = ($value === '') ? null : $value;
-
-                    // Column name is safe: whitelisted above, never user-supplied.
-                    $column = $columnMap[$remarkType];
+                    $column  = $columnMap[$remarkType];
 
                     $stmt = $pdo->prepare("
                         UPDATE payments
@@ -529,18 +543,25 @@ try {
                     );
                     break;
 
-                default: // edit_details
+                // -------------------------------------------------------------
+                // General detail edit (admin + office).
+                // Remarks are NOT touched here — they must go through
+                // `edit_remark` so the per-role rules above are enforced.
+                // -------------------------------------------------------------
+                case 'edit_details':
+                default:
                     requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
-                    $newRef  = $input['reference_number'] ?? null;
-                    $newAmt  = $input['amount'] ?? null;
-                    $newPurp = $input['purpose'] ?? null;
+
+                    $newRef      = $input['reference_number'] ?? null;
+                    $newAmt      = $input['amount'] ?? null;
+                    $newPurp     = $input['purpose'] ?? null;
                     $newDeceased = $input['deceased_name'] ?? null;
-                    $newPhone = isset($input['payers_phone_number']) ? validatePhone($input['payers_phone_number']) : null;
-                    $newEmail = $input['payers_email'] ?? null;
-                    $newPayer = $input['payers_name'] ?? null;
-                    $newChannel = $input['payment_channel'] ?? null;
-                    $remOff  = $input['remarks_office'] ?? null;
-                    $remGrn  = $input['remarks_grounds'] ?? null;
+                    $newPhone    = isset($input['payers_phone_number'])
+                        ? validatePhone($input['payers_phone_number'])
+                        : null;
+                    $newEmail    = $input['payers_email'] ?? null;
+                    $newPayer    = $input['payers_name'] ?? null;
+                    $newChannel  = $input['payment_channel'] ?? null;
 
                     $stmt = $pdo->prepare("
                         UPDATE payments 
@@ -553,8 +574,6 @@ try {
                             payers_phone_number = COALESCE(?, payers_phone_number),
                             payers_email = COALESCE(?, payers_email),
                             payers_name = COALESCE(?, payers_name),
-                            remarks_office = COALESCE(?, remarks_office),
-                            remarks_grounds = COALESCE(?, remarks_grounds),
                             updated_by = ?
                         WHERE payment_id = ? AND deleted_at IS NULL
                     ");
@@ -567,8 +586,6 @@ try {
                         $newPhone,
                         $newEmail,
                         $newPayer,
-                        $remOff,
-                        $remGrn,
                         $userId,
                         $resourceId
                     ]);
@@ -579,11 +596,13 @@ try {
 
         // ---------- DELETE (Soft Delete) ----------
         case 'DELETE':
-            requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
+            // Only ADMIN can soft-delete.
+            requireRole([ROLE_ADMIN], $role);
+
             if (!is_numeric($resourceId)) {
                 Response::error('Payment ID required.', 400);
             }
-            // Soft delete: set deleted_at and updated_by
+
             $stmt = $pdo->prepare("
                 UPDATE payments 
                 SET deleted_at = NOW(), updated_by = ? 

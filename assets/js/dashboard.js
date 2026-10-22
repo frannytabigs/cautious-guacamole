@@ -68,33 +68,97 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // ============================================================
+  // Small object helpers (safe key lookups on the payload)
+  // ============================================================
+  function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function hasKey(obj, key) {
+    return isPlainObject(obj) && Object.prototype.hasOwnProperty.call(obj, key);
+  }
+
+  // Returns a { visible, value } descriptor for a plain top-level key.
+  function pickKey(obj, key) {
+    if (!hasKey(obj, key)) return { visible: false, value: null };
+    return { visible: true, value: obj[key] };
+  }
+
+  // ============================================================
   // STAT CARDS — role-aware visibility
   // ============================================================
+  //
+  // Each card now resolves its own value from the payload via a
+  // `resolve(data)` function. It must return:
+  //     { visible: boolean, value: number|string|null }
+  //
+  // `visible: false` means "this role doesn't get this stat" → card is hidden.
+  // `visible: true`  means "show the card", even if the value is 0.
+  //
+  // This replaces the old `dataKey` approach, because the pending-payments
+  // stat is no longer a straight 1:1 key mapping — it's derived.
+  // ============================================================
+
+  // Pending payments:
+  //
+  //   Admin / Office  → any payment that has NOT been confirmed by BOTH
+  //                     office AND grounds staff. The backend already
+  //                     computes this as `payments.unconfirmed_count`
+  //                     (= total_count - fully_confirmed_count), so we
+  //                     read it straight from the Tier 2 block.
+  //
+  //   Grounds         → the Tier 2 `payments` block is intentionally not
+  //                     sent to Grounds (they don't see monetary totals),
+  //                     so we fall back to their own Tier 1 action queue,
+  //                     `payments_awaiting_my_confirmation`, which is the
+  //                     set of payments still waiting on a grounds
+  //                     confirmation.
+  //
+  //   Anything else   → fall back to the Tier 1 queue if present.
+  function resolvePendingPayments(data) {
+    // Tier 2 aggregate (Admin + Office): "not fully confirmed by all".
+    if (
+      isPlainObject(data.payments) &&
+      hasKey(data.payments, "unconfirmed_count")
+    ) {
+      const n = Number(data.payments.unconfirmed_count);
+      return { visible: true, value: Number.isFinite(n) ? n : 0 };
+    }
+
+    // Tier 1 personal queue (Grounds, and a safety net for anyone else).
+    if (hasKey(data, "payments_awaiting_my_confirmation")) {
+      const n = Number(data.payments_awaiting_my_confirmation);
+      return { visible: true, value: Number.isFinite(n) ? n : 0 };
+    }
+
+    return { visible: false, value: null };
+  }
+
   const STAT_CARDS = [
     {
       cardId: "total_interments",
       statId: "stat_total_interments",
-      dataKey: "total_interment_records",
+      resolve: (data) => pickKey(data, "total_interment_records"),
     },
     {
       cardId: "available_graves",
       statId: "stat_available_graves",
-      dataKey: "available_graves",
+      resolve: (data) => pickKey(data, "available_graves"),
     },
     {
       cardId: "expiring_leases",
       statId: "stat_expiring_leases",
-      dataKey: "expiring_leases_count",
+      resolve: (data) => pickKey(data, "expiring_leases_count"),
     },
     {
       cardId: "pending_payments",
       statId: "stat_pending_payments",
-      dataKey: "payments_awaiting_my_confirmation",
+      resolve: resolvePendingPayments,
     },
     {
       cardId: "unverified_accounts",
       statId: "stat_unverified_accounts",
-      dataKey: "unverified_accounts",
+      resolve: (data) => pickKey(data, "unverified_accounts"),
     },
   ];
 
@@ -140,7 +204,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function applyStats(data) {
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
+    if (!isPlainObject(data)) {
       showAllCardsFallback("payload was not an object");
       return;
     }
@@ -153,10 +217,19 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!card) return;
       cards.push(card);
 
-      const hasKey = Object.prototype.hasOwnProperty.call(data, cfg.dataKey);
-      if (hasKey) {
+      let result = { visible: false, value: null };
+      try {
+        const resolved = cfg.resolve(data);
+        if (isPlainObject(resolved)) result = resolved;
+      } catch (_) {
+        // A throwing resolver just means "hide this card" — never break
+        // the whole dashboard over one stat.
+        result = { visible: false, value: null };
+      }
+
+      if (result.visible) {
         card.style.display = "";
-        setStatValue(cfg.statId, data[cfg.dataKey]);
+        setStatValue(cfg.statId, result.value);
         visibleCount++;
       } else {
         card.style.display = "none";
