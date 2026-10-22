@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>500 — Server Meltdown</title>
+    <title>404 — Lost in the Void</title>
 
     <style>
       * {
@@ -13,15 +13,13 @@
       }
 
       :root {
-        --red: #ff1744;
-        --orange: #ff9100;
-        --yellow: #ffe600;
+        --bg: #080812;
+        --text: #ffffff;
         --pink: #ff2bd6;
         --cyan: #00f5ff;
+        --yellow: #ffe600;
         --purple: #8b5cf6;
         --green: #39ff88;
-        --bg: #09070b;
-        --white: #fff;
       }
 
       html,
@@ -32,318 +30,85 @@
       }
 
       body {
-        font-family: Inter, Arial, Helvetica, sans-serif;
-
-        color: var(--white);
+        font-family: Arial, Helvetica, sans-serif;
         background: var(--bg);
-
-        position: relative;
+        color: var(--text);
         cursor: crosshair;
+        position: relative;
       }
 
       /* =========================================================
-       BACKGROUND MELTDOWN
+       CHAOTIC BACKGROUND
     ========================================================= */
 
       body::before {
         content: "";
-
         position: fixed;
         inset: -50%;
-
-        z-index: -20;
+        z-index: -10;
 
         background:
           radial-gradient(
-            circle at 20% 20%,
-            rgba(255, 23, 68, 0.35),
-            transparent 20%
-          ),
-          radial-gradient(
-            circle at 80% 30%,
-            rgba(255, 145, 0, 0.28),
+            circle at 20% 30%,
+            rgba(255, 43, 214, 0.3),
             transparent 22%
           ),
           radial-gradient(
+            circle at 80% 20%,
+            rgba(0, 245, 255, 0.25),
+            transparent 25%
+          ),
+          radial-gradient(
             circle at 50% 80%,
-            rgba(255, 43, 214, 0.25),
+            rgba(139, 92, 246, 0.28),
             transparent 28%
           ),
           radial-gradient(
-            circle at 80% 90%,
-            rgba(0, 245, 255, 0.18),
+            circle at 90% 90%,
+            rgba(57, 255, 136, 0.18),
             transparent 20%
           );
 
-        filter: blur(55px);
-
-        animation: backgroundMeltdown 8s infinite alternate ease-in-out;
+        filter: blur(50px);
+        animation: bgChaos 12s infinite alternate ease-in-out;
       }
 
-      @keyframes backgroundMeltdown {
+      @keyframes bgChaos {
         0% {
           transform: rotate(0deg) scale(1);
         }
 
-        35% {
+        50% {
           transform: rotate(8deg) scale(1.2);
         }
 
-        70% {
-          transform: rotate(-5deg) scale(1.1);
-        }
-
         100% {
-          transform: rotate(12deg) scale(1.3);
+          transform: rotate(-8deg) scale(1.1);
         }
       }
 
-      /* =========================================================
-       SCREEN FLASH
-    ========================================================= */
+      /* Animated color wash */
 
-      .screen-flash {
+      .color-wash {
         position: fixed;
         inset: 0;
-
         pointer-events: none;
-
-        background: rgba(255, 0, 40, 0.12);
-
-        opacity: 0;
-
-        z-index: 50;
-
-        animation: screenFlash 5s infinite;
-      }
-
-      @keyframes screenFlash {
-        0%,
-        91%,
-        100% {
-          opacity: 0;
-        }
-
-        92% {
-          opacity: 0.8;
-        }
-
-        93% {
-          opacity: 0;
-        }
-
-        94% {
-          opacity: 0.35;
-        }
-
-        95% {
-          opacity: 0;
-        }
-      }
-
-      /* =========================================================
-       NOISE
-    ========================================================= */
-
-      .noise {
-        position: fixed;
-        inset: 0;
-
-        z-index: 40;
-
-        pointer-events: none;
-
-        opacity: 0.08;
-
-        background-image: repeating-radial-gradient(
-          circle at 0 0,
-          #fff 0,
-          transparent 1px,
-          transparent 3px
-        );
-
-        background-size: 6px 6px;
-
-        mix-blend-mode: overlay;
-      }
-
-      /* =========================================================
-       SCANLINES
-    ========================================================= */
-
-      .scanlines {
-        position: fixed;
-        inset: 0;
-
-        pointer-events: none;
-
-        z-index: 35;
-
-        opacity: 0.12;
-
-        background: repeating-linear-gradient(
-          to bottom,
-          transparent 0,
-          transparent 3px,
-          rgba(255, 255, 255, 0.05) 4px
-        );
-      }
-
-      /* =========================================================
-       MAIN
-    ========================================================= */
-
-      .page {
-        width: 100%;
-        height: 100%;
-
-        display: grid;
-        place-items: center;
-
-        padding: 20px;
-
-        position: relative;
-        isolation: isolate;
-      }
-
-      .content {
-        width: min(920px, 100%);
-
-        text-align: center;
-
-        position: relative;
-        z-index: 10;
-
-        transition: transform 0.15s ease-out;
-      }
-
-      /* =========================================================
-       SERVER STATUS
-    ========================================================= */
-
-      .server-status {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-
-        padding: 9px 15px;
-
-        border-radius: 8px;
-
-        background: rgba(255, 23, 68, 0.08);
-
-        border: 1px solid rgba(255, 23, 68, 0.4);
-
-        box-shadow: 0 0 25px rgba(255, 23, 68, 0.12);
-
-        font-family: monospace;
-
-        font-size: 0.72rem;
-        font-weight: 900;
-
-        letter-spacing: 0.15em;
-
-        color: #ff617c;
-
-        text-transform: uppercase;
-
-        animation: statusShake 3s infinite;
-      }
-
-      .server-light {
-        width: 8px;
-        height: 8px;
-
-        border-radius: 50%;
-
-        background: var(--red);
-
-        box-shadow:
-          0 0 8px var(--red),
-          0 0 18px var(--red);
-
-        animation: serverBlink 0.4s infinite alternate;
-      }
-
-      @keyframes serverBlink {
-        from {
-          opacity: 0.2;
-        }
-
-        to {
-          opacity: 1;
-        }
-      }
-
-      @keyframes statusShake {
-        0%,
-        92%,
-        100% {
-          transform: translateX(0);
-        }
-
-        93% {
-          transform: translateX(-4px);
-        }
-
-        94% {
-          transform: translateX(5px);
-        }
-
-        95% {
-          transform: translateX(-2px);
-        }
-      }
-
-      /* =========================================================
-       BIG 500
-    ========================================================= */
-
-      .error {
-        position: relative;
-
-        margin: 45px 0 30px;
-
-        user-select: none;
-      }
-
-      .number {
-        position: relative;
-
-        display: inline-block;
-
-        font-size: clamp(8rem, 27vw, 18rem);
-
-        line-height: 0.7;
-
-        font-weight: 1000;
-
-        letter-spacing: -0.12em;
-
-        color: transparent;
+        z-index: -9;
 
         background: linear-gradient(
-          120deg,
-          #ff1744,
-          #ff9100,
-          #ffe600,
-          #ff2bd6,
-          #ff1744
+          115deg,
+          transparent 20%,
+          rgba(255, 0, 153, 0.08),
+          transparent 40%,
+          rgba(0, 255, 255, 0.07),
+          transparent 70%
         );
 
         background-size: 300% 300%;
-
-        -webkit-background-clip: text;
-        background-clip: text;
-
-        filter: drop-shadow(0 0 15px rgba(255, 23, 68, 0.5));
-
-        animation:
-          gradientMove 3s linear infinite,
-          numberGlitch 4s infinite;
+        animation: wash 7s linear infinite;
       }
 
-      @keyframes gradientMove {
+      @keyframes wash {
         0% {
           background-position: 0% 50%;
         }
@@ -357,250 +122,242 @@
         }
       }
 
-      @keyframes numberGlitch {
-        0%,
-        80%,
-        100% {
-          transform: translate(0) skewX(0);
-        }
+      /* =========================================================
+       NOISE
+    ========================================================= */
 
-        82% {
-          transform: translate(-7px, 2px) skewX(8deg);
-        }
-
-        84% {
-          transform: translate(9px, -3px) skewX(-12deg);
-        }
-
-        86% {
-          transform: translate(-3px, 0) skewX(4deg);
-        }
-      }
-
-      .number::before,
-      .number::after {
-        content: "500";
-
-        position: absolute;
+      .noise {
+        position: fixed;
         inset: 0;
-
         pointer-events: none;
+        z-index: 20;
+        opacity: 0.07;
 
-        font: inherit;
+        background-image: repeating-radial-gradient(
+          circle at 0 0,
+          #fff 0,
+          transparent 1px,
+          transparent 3px
+        );
+
+        background-size: 7px 7px;
+        mix-blend-mode: overlay;
       }
 
-      .number::before {
-        color: var(--cyan);
+      /* =========================================================
+       MAIN
+    ========================================================= */
 
-        -webkit-background-clip: initial;
-        background-clip: initial;
-        background: none;
-
-        transform: translate(-7px, 2px);
-
-        clip-path: inset(15% 0 60% 0);
-
-        animation: glitchOne 1.7s infinite steps(2);
+      .page {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        padding: 25px;
+        position: relative;
+        isolation: isolate;
       }
 
-      .number::after {
-        color: var(--pink);
-
-        background: none;
-
-        transform: translate(7px, -2px);
-
-        clip-path: inset(55% 0 12% 0);
-
-        animation: glitchTwo 2.1s infinite steps(2);
+      .content {
+        width: min(900px, 100%);
+        text-align: center;
+        position: relative;
+        z-index: 5;
       }
 
-      @keyframes glitchOne {
+      /* =========================================================
+       TOP LABEL
+    ========================================================= */
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+
+        padding: 9px 15px;
+
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(15px);
+
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+
+        animation: floating 3s ease-in-out infinite;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow:
+          0 0 8px var(--green),
+          0 0 20px var(--green);
+
+        animation: blink 0.8s infinite alternate;
+      }
+
+      @keyframes blink {
+        from {
+          opacity: 0.3;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes floating {
         0%,
-        70%,
         100% {
-          transform: translate(-7px, 2px);
+          transform: translateY(0) rotate(-1deg);
         }
 
-        72% {
-          transform: translate(15px, -6px);
-        }
-
-        74% {
-          transform: translate(-20px, 4px);
-        }
-      }
-
-      @keyframes glitchTwo {
-        0%,
-        63%,
-        100% {
-          transform: translate(7px, -2px);
-        }
-
-        65% {
-          transform: translate(-17px, 5px);
-        }
-
-        68% {
-          transform: translate(20px, -4px);
+        50% {
+          transform: translateY(-7px) rotate(1deg);
         }
       }
 
       /* =========================================================
-       HEADLINE
+       404
+    ========================================================= */
+
+      .error-number {
+        position: relative;
+
+        font-size: clamp(7rem, 25vw, 17rem);
+        line-height: 0.8;
+
+        font-weight: 1000;
+        letter-spacing: -0.09em;
+
+        margin: 40px 0 30px;
+
+        color: white;
+
+        text-shadow:
+          5px 0 var(--pink),
+          -5px 0 var(--cyan);
+
+        animation: numberChaos 4s infinite steps(1);
+        user-select: none;
+      }
+
+      .error-number::before,
+      .error-number::after {
+        content: "404";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .error-number::before {
+        color: var(--pink);
+        transform: translate(-5px, 3px);
+        clip-path: inset(20% 0 55% 0);
+        animation: glitchA 2.2s infinite steps(2);
+        opacity: 0.8;
+      }
+
+      .error-number::after {
+        color: var(--cyan);
+        transform: translate(5px, -3px);
+        clip-path: inset(55% 0 15% 0);
+        animation: glitchB 1.8s infinite steps(2);
+        opacity: 0.8;
+      }
+
+      @keyframes numberChaos {
+        0%,
+        85%,
+        100% {
+          transform: rotate(0deg) skewX(0);
+        }
+
+        87% {
+          transform: rotate(-1deg) skewX(4deg);
+        }
+
+        89% {
+          transform: rotate(1deg) skewX(-7deg);
+        }
+
+        91% {
+          transform: rotate(0deg);
+        }
+      }
+
+      @keyframes glitchA {
+        0%,
+        75%,
+        100% {
+          transform: translate(-5px, 3px);
+        }
+
+        77% {
+          transform: translate(12px, -4px);
+        }
+
+        79% {
+          transform: translate(-15px, 5px);
+        }
+      }
+
+      @keyframes glitchB {
+        0%,
+        65%,
+        100% {
+          transform: translate(5px, -3px);
+        }
+
+        68% {
+          transform: translate(-13px, 6px);
+        }
+
+        71% {
+          transform: translate(15px, -5px);
+        }
+      }
+
+      /* =========================================================
+       TEXT
     ========================================================= */
 
       h1 {
-        font-size: clamp(1.5rem, 4vw, 2.8rem);
-
-        font-weight: 1000;
-
+        font-size: clamp(1.6rem, 4vw, 3rem);
+        font-weight: 950;
         margin-bottom: 12px;
 
-        letter-spacing: -0.04em;
-
-        animation: headingShake 6s infinite;
+        transform: rotate(-1deg);
       }
 
-      @keyframes headingShake {
+      h1 span {
+        display: inline-block;
+        animation: textWobble 2.5s infinite ease-in-out;
+      }
+
+      @keyframes textWobble {
         0%,
-        92%,
         100% {
           transform: rotate(0);
         }
 
-        93% {
-          transform: rotate(-1deg) translateX(-2px);
-        }
-
-        94% {
-          transform: rotate(1deg) translateX(3px);
+        50% {
+          transform: rotate(2deg) translateY(-2px);
         }
       }
-
-      .headline-highlight {
-        color: var(--orange);
-
-        text-shadow: 0 0 15px rgba(255, 145, 0, 0.35);
-      }
-
-      /* =========================================================
-       DESCRIPTION
-    ========================================================= */
 
       .description {
-        width: min(580px, 100%);
-
+        max-width: 550px;
         margin: auto;
 
-        color: rgba(255, 255, 255, 0.58);
-
+        color: rgba(255, 255, 255, 0.62);
+        font-size: clamp(0.9rem, 2vw, 1.05rem);
         line-height: 1.7;
-
-        font-size: clamp(0.88rem, 2vw, 1rem);
-      }
-
-      /* =========================================================
-       TERMINAL
-    ========================================================= */
-
-      .terminal {
-        width: min(620px, 100%);
-
-        margin: 28px auto 0;
-
-        padding: 16px;
-
-        text-align: left;
-
-        background: rgba(0, 0, 0, 0.45);
-
-        border: 1px solid rgba(255, 255, 255, 0.12);
-
-        border-radius: 10px;
-
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-
-        backdrop-filter: blur(15px);
-
-        font-family: "Courier New", monospace;
-
-        font-size: 0.72rem;
-
-        overflow: hidden;
-
-        position: relative;
-      }
-
-      .terminal::before {
-        content: "";
-
-        position: absolute;
-
-        left: 0;
-        right: 0;
-
-        top: 0;
-
-        height: 2px;
-
-        background: linear-gradient(
-          90deg,
-          var(--red),
-          var(--orange),
-          var(--yellow),
-          var(--pink)
-        );
-
-        animation: terminalProgress 2s infinite linear;
-      }
-
-      @keyframes terminalProgress {
-        from {
-          transform: translateX(-100%);
-        }
-
-        to {
-          transform: translateX(100%);
-        }
-      }
-
-      .terminal-line {
-        margin: 5px 0;
-
-        color: rgba(255, 255, 255, 0.48);
-      }
-
-      .terminal-line .prompt {
-        color: var(--green);
-      }
-
-      .terminal-line .error-text {
-        color: var(--red);
-      }
-
-      .terminal-line .warning {
-        color: var(--yellow);
-      }
-
-      #terminalCursor {
-        display: inline-block;
-
-        width: 7px;
-        height: 13px;
-
-        background: var(--green);
-
-        vertical-align: middle;
-
-        animation: cursorBlink 0.7s infinite;
-      }
-
-      @keyframes cursorBlink {
-        50% {
-          opacity: 0;
-        }
       }
 
       /* =========================================================
@@ -609,214 +366,223 @@
 
       .actions {
         display: flex;
-
         justify-content: center;
-
+        gap: 12px;
         flex-wrap: wrap;
 
-        gap: 12px;
-
-        margin-top: 25px;
+        margin-top: 30px;
       }
 
       .btn {
         border: 0;
+        padding: 13px 21px;
 
-        border-radius: 10px;
-
-        padding: 13px 20px;
-
-        font-size: 0.8rem;
-
-        font-weight: 900;
-
-        text-decoration: none;
-
-        cursor: pointer;
+        border-radius: 14px;
 
         color: white;
+        text-decoration: none;
+
+        font-size: 0.85rem;
+        font-weight: 900;
+
+        cursor: pointer;
 
         transition:
           transform 0.2s ease,
           box-shadow 0.2s ease;
+
+        position: relative;
+        overflow: hidden;
       }
 
       .btn:hover {
-        transform: translateY(-4px) rotate(-1deg) scale(1.04);
+        transform: translateY(-5px) rotate(-2deg) scale(1.05);
       }
 
       .btn-home {
-        background: linear-gradient(135deg, #ff1744, #ff9100);
-
-        box-shadow: 0 10px 35px rgba(255, 23, 68, 0.25);
+        background: linear-gradient(135deg, #ff2bd6, #8b5cf6);
+        box-shadow: 0 10px 35px rgba(255, 43, 214, 0.25);
       }
 
-      .btn-retry {
-        background: rgba(255, 255, 255, 0.06);
-
-        border: 1px solid rgba(255, 255, 255, 0.14);
-
+      .btn-random {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         backdrop-filter: blur(12px);
       }
 
       /* =========================================================
-       FLOATING CHAOS
+       RANDOM FLOATING OBJECTS
     ========================================================= */
 
-      .chaos {
+      .objects {
         position: fixed;
-
         inset: 0;
-
         pointer-events: none;
-
         overflow: hidden;
-
-        z-index: 2;
+        z-index: 1;
       }
 
-      .chaos-item {
+      .object {
         position: absolute;
 
-        font-family: monospace;
+        display: grid;
+        place-items: center;
 
-        font-weight: 900;
+        width: var(--size);
+        height: var(--size);
 
-        color: var(--chaos-color);
+        font-size: calc(var(--size) * 0.55);
 
-        font-size: var(--size);
+        opacity: 0.8;
 
-        opacity: var(--opacity);
+        animation:
+          drift var(--duration) infinite ease-in-out,
+          spin var(--spin) infinite linear;
 
-        text-shadow: 0 0 12px currentColor;
-
-        animation: chaosFloat var(--duration) infinite ease-in-out;
-
-        animation-delay: var(--delay);
+        filter: drop-shadow(0 0 12px currentColor);
       }
 
-      @keyframes chaosFloat {
+      @keyframes drift {
         0%,
         100% {
-          transform: translate(0, 0) rotate(0);
+          transform: translate3d(0, 0, 0) rotate(0deg);
         }
 
         25% {
-          transform: translate(40px, -50px) rotate(30deg);
+          transform: translate3d(30px, -50px, 0) rotate(20deg);
         }
 
         50% {
-          transform: translate(-50px, 30px) rotate(-40deg);
+          transform: translate3d(-40px, -20px, 0) rotate(-20deg);
         }
 
         75% {
-          transform: translate(60px, 50px) rotate(60deg);
+          transform: translate3d(50px, 30px, 0) rotate(35deg);
+        }
+      }
+
+      @keyframes spin {
+        to {
+          rotate: 360deg;
         }
       }
 
       /* =========================================================
-       SYSTEM WARNING
+       CHAOS RINGS
     ========================================================= */
 
-      .warning-box {
+      .ring {
         position: fixed;
 
-        left: 20px;
-        bottom: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 50%;
 
-        z-index: 15;
+        pointer-events: none;
 
-        max-width: 270px;
-
-        padding: 10px 13px;
-
-        background: rgba(255, 145, 0, 0.08);
-
-        border: 1px solid rgba(255, 145, 0, 0.3);
-
-        color: rgba(255, 196, 70, 0.7);
-
-        font-family: monospace;
-
-        font-size: 0.62rem;
-
-        text-align: left;
-
-        transform: rotate(-2deg);
-
-        animation: warningFloat 4s infinite ease-in-out;
+        animation: ringMove 15s infinite alternate ease-in-out;
       }
 
-      @keyframes warningFloat {
-        0%,
-        100% {
-          transform: rotate(-2deg) translateY(0);
-        }
-
-        50% {
-          transform: rotate(1deg) translateY(-5px);
-        }
+      .ring.one {
+        width: 350px;
+        height: 350px;
+        left: -160px;
+        top: 10%;
       }
 
-      /* =========================================================
-       CPU BAR
-    ========================================================= */
-
-      .cpu {
-        position: fixed;
-
-        right: 20px;
-        bottom: 20px;
-
-        width: 150px;
-
-        z-index: 15;
-
-        font-family: monospace;
-
-        font-size: 0.6rem;
-
-        color: rgba(255, 255, 255, 0.4);
+      .ring.two {
+        width: 550px;
+        height: 550px;
+        right: -260px;
+        bottom: -150px;
+        animation-duration: 22s;
       }
 
-      .cpu-label {
-        display: flex;
-
-        justify-content: space-between;
-
-        margin-bottom: 5px;
+      .ring.three {
+        width: 180px;
+        height: 180px;
+        right: 10%;
+        top: 8%;
+        animation-duration: 9s;
       }
 
-      .cpu-bar {
-        height: 5px;
-
-        background: rgba(255, 255, 255, 0.08);
-
-        overflow: hidden;
-      }
-
-      .cpu-fill {
-        width: 97%;
-
-        height: 100%;
-
-        background: linear-gradient(
-          90deg,
-          var(--yellow),
-          var(--orange),
-          var(--red)
-        );
-
-        animation: cpuPanic 0.8s infinite alternate;
-      }
-
-      @keyframes cpuPanic {
+      @keyframes ringMove {
         from {
-          width: 78%;
+          transform: rotate(0deg) scale(1);
         }
 
         to {
-          width: 100%;
+          transform: rotate(180deg) scale(1.25);
+        }
+      }
+
+      /* =========================================================
+       PARTICLES
+    ========================================================= */
+
+      .particle {
+        position: fixed;
+
+        width: 3px;
+        height: 3px;
+
+        border-radius: 50%;
+
+        background: white;
+
+        pointer-events: none;
+
+        animation: particleFloat var(--time) infinite linear;
+      }
+
+      @keyframes particleFloat {
+        from {
+          transform: translateY(110vh) translateX(0);
+          opacity: 0;
+        }
+
+        15% {
+          opacity: 0.8;
+        }
+
+        85% {
+          opacity: 0.8;
+        }
+
+        to {
+          transform: translateY(-10vh) translateX(var(--drift));
+          opacity: 0;
+        }
+      }
+
+      /* =========================================================
+       RANDOM MESSAGE
+    ========================================================= */
+
+      .random-message {
+        margin-top: 25px;
+
+        font-family: monospace;
+        font-size: 0.72rem;
+        color: rgba(255, 255, 255, 0.35);
+
+        min-height: 18px;
+
+        animation: flicker 4s infinite;
+      }
+
+      @keyframes flicker {
+        0%,
+        90%,
+        100% {
+          opacity: 1;
+        }
+
+        92% {
+          opacity: 0.1;
+        }
+
+        94% {
+          opacity: 0.8;
         }
       }
 
@@ -824,32 +590,42 @@
        MOBILE
     ========================================================= */
 
-      @media (max-width: 650px) {
+      @media (max-width: 600px) {
         body {
           cursor: default;
         }
 
         .page {
-          padding: 15px;
+          padding: 18px;
         }
 
-        .error {
-          margin: 38px 0 25px;
+        .error-number {
+          margin: 35px 0 25px;
         }
 
-        .terminal {
-          font-size: 0.62rem;
-          padding: 13px;
+        .description {
+          padding: 0 10px;
         }
 
-        .warning-box,
-        .cpu {
+        .objects .object:nth-child(n + 9) {
           display: none;
+        }
+
+        .ring.one {
+          width: 220px;
+          height: 220px;
+          left: -130px;
+        }
+
+        .ring.two {
+          width: 300px;
+          height: 300px;
+          right: -180px;
         }
 
         .btn {
           width: 100%;
-          max-width: 250px;
+          max-width: 240px;
         }
       }
 
@@ -858,119 +634,66 @@
         *::before,
         *::after {
           animation-duration: 0.001ms !important;
-
           animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
         }
       }
     </style>
   </head>
 
   <body data-app-root="">
-    <div class="screen-flash"></div>
+    <div class="color-wash"></div>
     <div class="noise"></div>
-    <div class="scanlines"></div>
 
-    <!-- Random floating system debris -->
-    <div class="chaos" id="chaos"></div>
+    <!-- Decorative rings -->
+    <div class="ring one"></div>
+    <div class="ring two"></div>
+    <div class="ring three"></div>
+
+    <!-- Random floating objects -->
+    <div class="objects" id="objects"></div>
+
+    <!-- Random particles -->
+    <div id="particles"></div>
 
     <main class="page">
-      <section class="content" id="content">
-        <div class="server-status">
-          <span class="server-light"></span>
-          <span id="serverStatus"> SERVER EXPERIENCING EMOTIONAL DAMAGE </span>
+      <section class="content">
+        <div class="status">
+          <span class="status-dot"></span>
+          <span id="statusText">SIGNAL LOST</span>
         </div>
 
-        <div class="error">
-          <div class="number">500</div>
-        </div>
+        <div class="error-number" aria-label="404">404</div>
 
         <h1>
-          <span class="headline-highlight"> OH NO. </span>
-          The server did a thing.
+          <span id="title">Oops. You wandered somewhere weird.</span>
         </h1>
 
         <p class="description" id="description">
-          Something went catastrophically wrong on our end. The page didn't
-          crash gracefully. It chose violence.
+          The page you're looking for has either disappeared, escaped into
+          another dimension, or was never here in the first place.
         </p>
 
-        <div class="terminal">
-          <div class="terminal-line">
-            <span class="prompt">$</span>
-            initiating recovery...
-          </div>
+        <div class="actions">
+          <!-- id="homeLink" lets the script below fix this href at runtime -->
+          <a href="/" id="homeLink" class="btn btn-home"> 🏠 TAKE ME HOME </a>
 
-          <div class="terminal-line">
-            <span class="prompt">$</span>
-            checking server health...
-          </div>
-
-          <div class="terminal-line">
-            <span class="warning"> [WARNING] </span>
-            CPU has concerns.
-          </div>
-
-          <div class="terminal-line">
-            <span class="prompt">$</span>
-            checking database...
-          </div>
-
-          <div class="terminal-line">
-            <span class="error-text"> [FATAL] </span>
-            database said "no".
-          </div>
-
-          <div class="terminal-line">
-            <span class="prompt">$</span>
-            attempting optimism...
-          </div>
-
-          <div class="terminal-line">
-            <span class="error-text"> [FAILED] </span>
-            optimism unavailable.
-          </div>
-
-          <div class="terminal-line">
-            <span class="prompt">$</span>
-            <span id="terminalText"> please stand by </span
-            ><span id="terminalCursor"></span>
-          </div>
+          <button class="btn btn-random" id="randomBtn">
+            🎲 MAKE IT WORSE
+          </button>
         </div>
 
-        <div class="actions">
-          <!-- id="homeLink" lets fixHomeLink() rewrite href at runtime -->
-          <a href="/" id="homeLink" class="btn btn-home">
-            🏠 ESCAPE TO SAFETY
-          </a>
-
-          <button class="btn btn-retry" id="retryBtn">
-            🔄 POKE THE SERVER
-          </button>
+        <div class="random-message" id="randomMessage">
+          SYSTEM MESSAGE: reality.exe is still running
         </div>
       </section>
     </main>
 
-    <div class="warning-box">
-      ⚠ SYSTEM NOTICE<br />
-      <span id="warningText"> Server temperature: unnecessarily spicy. </span>
-    </div>
-
-    <div class="cpu">
-      <div class="cpu-label">
-        <span>SERVER PANIC</span>
-        <span id="cpuPercent">97%</span>
-      </div>
-
-      <div class="cpu-bar">
-        <div class="cpu-fill"></div>
-      </div>
-    </div>
-
     <script>
       /* ============================================================
-   FIX "ESCAPE TO SAFETY" LINK  —  Laragon / XAMPP / live safe
+   FIX "TAKE ME HOME" LINK  —  works on Laragon, XAMPP, and live
    ------------------------------------------------------------
-   Rules (first match wins):
+   Rules (evaluated top-to-bottom, first match wins):
 
      1. data-app-root on <body>     -> use it verbatim
      2. file:// (opened from disk)  -> link to index.html
@@ -984,8 +707,8 @@
    Examples:
      capstone.test/whatever/missing       -> "/"
      localhost/capstone/whatever/missing  -> "/capstone/"
-     localhost/capstone/500.html          -> "/capstone/"
-     localhost/500.html                   -> "/"
+     localhost/capstone/404.html          -> "/capstone/"
+     localhost/404.html                   -> "/"
      mysite.com/app/missing               -> "/"  (use data-app-root)
 ============================================================ */
       (function fixHomeLink() {
@@ -1032,93 +755,104 @@
       })();
 
       /* ============================================================
-   SERVER CHAOS
+   CHAOS ENGINE
 ============================================================ */
 
+      const titles = [
+        "Oops. You wandered somewhere weird.",
+        "Congratulations. You broke the internet.",
+        "This page has left the building.",
+        "Reality has encountered an error.",
+        "Well... this wasn't supposed to happen.",
+        "404? More like 4-OH-NO.",
+        "You found the forbidden hallway.",
+        "The page is currently on vacation.",
+        "Houston, we have a missing page.",
+        "Nothing to see here. Definitely.",
+        "You have entered the void.",
+        "This URL has chosen violence.",
+        "The server blinked. It's gone.",
+        "Somewhere, a developer is crying.",
+        "Achievement unlocked: Lost.",
+        "The page escaped containment.",
+      ];
+
       const descriptions = [
-        "Something went catastrophically wrong on our end. The page didn't crash gracefully. It chose violence.",
-        "Our server encountered an unexpected situation and responded by questioning its life choices.",
-        "The server has stopped cooperating. We have tried asking nicely.",
-        "Something broke. We don't know what. The logs are mostly screaming.",
-        "The requested operation caused the server to briefly reconsider existence.",
-        "A mysterious error has occurred. Scientists are baffled. Developers are concerned.",
-        "The server encountered a problem and immediately made it everyone's problem.",
-        "Everything was fine approximately three seconds ago.",
+        "The page you're looking for has either disappeared, escaped into another dimension, or was never here in the first place.",
+        "We searched everywhere. Under the server. Behind the database. Even inside the CSS. Nothing.",
+        "This route appears to have been eaten by a highly suspicious digital creature.",
+        "The requested page is currently unavailable because it has apparently developed free will.",
+        "Your browser arrived at the correct address. Unfortunately, the address did not arrive at the correct page.",
+        "We have absolutely no idea where that page went.",
+        "Something went wrong. Something colorful. Something probably unnecessary.",
+        "The URL exists only in the dreams of the server.",
+        "You've reached a place that technically exists, but definitely shouldn't.",
       ];
 
-      const statuses = [
-        "SERVER EXPERIENCING EMOTIONAL DAMAGE",
-        "CRITICAL SERVER NONSENSE",
-        "INTERNAL PANIC DETECTED",
-        "SERVER HAS HAD ENOUGH",
-        "THERMAL CONFUSION DETECTED",
-        "STACK TRACE ESCAPED",
-        "DATABASE LOOKING SUSPICIOUS",
-        "PRODUCTION IS SCREAMING",
-        "EVERYTHING IS FINE™",
-        "SERVER.EXE IS QUESTIONING REALITY",
+      const messages = [
+        "SYSTEM MESSAGE: reality.exe is still running",
+        "ERROR: page.exe has stopped responding",
+        "WARNING: excessive amounts of nonsense detected",
+        "STATUS: absolutely no idea what happened",
+        "TRACE: user → void → confusion",
+        "404_HANDLER: screaming internally...",
+        "SERVER: 'bro I don't know either'",
+        "DATABASE: page not found. vibes found.",
+        "ERROR CODE: WHERE_AM_I",
+        "DEBUG: have you tried turning reality off and on?",
+        "MEMORIA://lost-and-confused",
+        "COSMIC ROUTER: destination unknown",
+        "PING: void responded with 'lol'",
+        "SYSTEM: chaos level acceptable",
+        "WARNING: unauthorized silliness detected",
       ];
 
-      const warnings = [
-        "Server temperature: unnecessarily spicy.",
-        "Do not unplug the server. It is sensitive.",
-        "Several electrons have filed complaints.",
-        "Please remain calm. The server is not calm.",
-        "A developer has been notified. Probably.",
-        "Error levels are currently doing their best.",
-        "The stack trace contains several emotional words.",
-        "This is why we can't have nice things.",
-        "Server is running on thoughts and prayers.",
-        "Have you tried turning the internet off?",
+      const statusTexts = [
+        "SIGNAL LOST",
+        "ROUTE MISSING",
+        "VOID DETECTED",
+        "PAGE ESCAPED",
+        "REALITY ERROR",
+        "404 INCIDENT",
+        "CHAOS ACTIVE",
+        "NOTHING HERE",
+        "SERVER CONFUSED",
       ];
 
-      const terminalMessages = [
-        "please stand by",
-        "restarting optimism",
-        "consulting the logs",
-        "asking the server nicely",
-        "counting backwards from 500",
-        "sacrificing a semicolon",
-        "rebooting questionable decisions",
-        "looking for the problem",
-        "pretending this was intentional",
-        "probably fixing it",
-        "still screaming",
-        "everything is definitely fine",
-      ];
-
-      const chaosSymbols = [
-        "ERR",
-        "500",
-        "!",
+      const symbols = [
+        "✦",
+        "✧",
+        "✹",
+        "✺",
+        "✸",
+        "◆",
+        "◇",
+        "●",
+        "○",
+        "▲",
+        "△",
+        "★",
+        "☆",
+        "⚡",
+        "☄",
         "?",
-        "!!!",
-        "NULL",
-        "NaN",
-        "0xDEAD",
-        "FATAL",
-        "404?",
-        "sudo",
-        "???",
-        "💥",
-        "⚠",
-        "☠",
+        "!",
+        "404",
         "∞",
-        "//",
-        "::",
-        "EOF",
-        "undefined",
+        "⊙",
+        "⌁",
+        "※",
+        "⟡",
+        "☠",
+        "◈",
       ];
 
-      const colors = [
-        "#ff1744",
-        "#ff9100",
-        "#ffe600",
-        "#ff2bd6",
-        "#00f5ff",
-        "#8b5cf6",
-        "#39ff88",
-      ];
+      const colors = ["#ff2bd6", "#00f5ff", "#ffe600", "#8b5cf6", "#39ff88"];
+
+      const title = document.getElementById("title");
+      const description = document.getElementById("description");
+      const randomMessage = document.getElementById("randomMessage");
+      const statusText = document.getElementById("statusText");
 
       function random(array) {
         return array[Math.floor(Math.random() * array.length)];
@@ -1129,206 +863,153 @@
       }
 
       /* ============================================================
-   TEXT CHAOS
+   RANDOMIZE TEXT
 ============================================================ */
 
-      const description = document.getElementById("description");
-
-      const serverStatus = document.getElementById("serverStatus");
-
-      const warningText = document.getElementById("warningText");
-
-      const terminalText = document.getElementById("terminalText");
-
-      function changeServerMood() {
+      function randomizeText() {
+        title.textContent = random(titles);
         description.textContent = random(descriptions);
-
-        serverStatus.textContent = random(statuses);
-
-        warningText.textContent = random(warnings);
-
-        terminalText.textContent = random(terminalMessages);
+        randomMessage.textContent = random(messages);
+        statusText.textContent = random(statusTexts);
       }
 
-      setInterval(() => {
-        if (Math.random() > 0.35) {
-          changeServerMood();
-        }
-      }, 5000);
+      document.getElementById("randomBtn").addEventListener("click", () => {
+        randomizeText();
 
-      /* ============================================================
-   CHAOTIC FLOATING ELEMENTS
-============================================================ */
+        document.querySelector(".error-number").style.transform =
+          `rotate(${randomRange(-5, 5)}deg) skewX(${randomRange(-8, 8)}deg)`;
 
-      const chaos = document.getElementById("chaos");
-
-      for (let i = 0; i < 28; i++) {
-        const item = document.createElement("div");
-
-        item.className = "chaos-item";
-
-        item.textContent = random(chaosSymbols);
-
-        item.style.left = `${randomRange(-5, 100)}%`;
-
-        item.style.top = `${randomRange(-5, 105)}%`;
-
-        item.style.setProperty("--size", `${randomRange(10, 40)}px`);
-
-        item.style.setProperty("--opacity", randomRange(0.15, 0.65));
-
-        item.style.setProperty("--duration", `${randomRange(5, 18)}s`);
-
-        item.style.setProperty("--delay", `${randomRange(-15, 0)}s`);
-
-        item.style.setProperty("--chaos-color", random(colors));
-
-        chaos.appendChild(item);
-      }
-
-      /* ============================================================
-   SERVER RETRY BUTTON
-============================================================ */
-
-      const retryBtn = document.getElementById("retryBtn");
-
-      retryBtn.addEventListener("click", () => {
-        changeServerMood();
-
-        const content = document.getElementById("content");
-
-        content.animate(
+        document.body.animate(
           [
-            {
-              transform: "translateX(0) rotate(0)",
-            },
-            {
-              transform: "translateX(-10px) rotate(-1deg)",
-            },
-            {
-              transform: "translateX(10px) rotate(1deg)",
-            },
-            {
-              transform: "translateX(-7px) rotate(-1deg)",
-            },
-            {
-              transform: "translateX(0) rotate(0)",
-            },
+            { filter: "hue-rotate(0deg)" },
+            { filter: "hue-rotate(180deg)" },
+            { filter: "hue-rotate(360deg)" },
           ],
           {
-            duration: 450,
-            easing: "steps(5)",
+            duration: 700,
+            easing: "ease-in-out",
           },
         );
-
-        retryBtn.textContent = random([
-          "💥 SERVER POKED",
-          "🔥 THAT PROBABLY HELPED",
-          "⚠ BIG MISTAKE",
-          "🫠 TRYING AGAIN...",
-          "💀 OH NO",
-          "✨ MAGIC DEPLOYED",
-        ]);
-
-        setTimeout(() => {
-          retryBtn.textContent = "🔄 POKE THE SERVER";
-        }, 1600);
       });
 
+      /* Automatically change message */
+      setInterval(() => {
+        randomMessage.textContent = random(messages);
+      }, 3500);
+
+      /* Occasionally change the title */
+      setInterval(() => {
+        if (Math.random() > 0.45) {
+          title.textContent = random(titles);
+        }
+      }, 7000);
+
       /* ============================================================
-   MOUSE PARALLAX
+   FLOATING OBJECTS
 ============================================================ */
+
+      const objectContainer = document.getElementById("objects");
+
+      for (let i = 0; i < 18; i++) {
+        const object = document.createElement("div");
+
+        object.className = "object";
+
+        object.textContent = random(symbols);
+
+        const size = randomRange(20, 65);
+
+        object.style.setProperty("--size", `${size}px`);
+        object.style.setProperty("--duration", `${randomRange(6, 16)}s`);
+
+        object.style.setProperty("--spin", `${randomRange(4, 15)}s`);
+
+        object.style.left = `${randomRange(-3, 97)}%`;
+        object.style.top = `${randomRange(-5, 100)}%`;
+
+        object.style.color = random(colors);
+
+        object.style.animationDelay = `${randomRange(-15, 0)}s`;
+
+        objectContainer.appendChild(object);
+      }
+
+      /* ============================================================
+   PARTICLES
+============================================================ */
+
+      const particleContainer = document.getElementById("particles");
+
+      for (let i = 0; i < 55; i++) {
+        const particle = document.createElement("div");
+
+        particle.className = "particle";
+
+        particle.style.left = `${randomRange(0, 100)}%`;
+
+        particle.style.setProperty("--time", `${randomRange(5, 18)}s`);
+
+        particle.style.setProperty("--drift", `${randomRange(-150, 150)}px`);
+
+        particle.style.animationDelay = `${randomRange(-18, 0)}s`;
+
+        particle.style.opacity = randomRange(0.2, 0.8);
+
+        particleContainer.appendChild(particle);
+      }
+
+      /* ============================================================
+   MOUSE CHAOS
+============================================================ */
+
+      let mouseX = 0;
+      let mouseY = 0;
 
       document.addEventListener("mousemove", (event) => {
-        const x = (event.clientX / window.innerWidth - 0.5) * 2;
+        mouseX = event.clientX;
+        mouseY = event.clientY;
 
-        const y = (event.clientY / window.innerHeight - 0.5) * 2;
+        const x = (mouseX / window.innerWidth - 0.5) * 2;
+        const y = (mouseY / window.innerHeight - 0.5) * 2;
 
-        document.getElementById("content").style.transform = `
-                translate(
-                    ${x * 5}px,
-                    ${y * 5}px
-                )
-                `;
+        document.querySelector(".content").style.transform =
+          `translate(${x * 5}px, ${y * 5}px)`;
 
-        chaos.style.transform = `
-            translate(
-                ${x * -12}px,
-                ${y * -12}px
-            )
-            `;
+        document.querySelector(".ring.three").style.transform =
+          `translate(${x * 25}px, ${y * 25}px) rotate(${x * 30}deg)`;
       });
 
       /* ============================================================
-   CPU PANIC NUMBER
-============================================================ */
-
-      const cpuPercent = document.getElementById("cpuPercent");
-
-      setInterval(() => {
-        cpuPercent.textContent = `${Math.floor(randomRange(91, 101))}%`;
-      }, 700);
-
-      /* ============================================================
-   RANDOM SCREEN GLITCH
+   RANDOM HUE SHIFT
 ============================================================ */
 
       setInterval(() => {
         if (Math.random() > 0.6) {
-          document.body.animate(
-            [
-              {
-                transform: "translate(0)",
-              },
+          const hue = Math.floor(randomRange(0, 360));
 
-              {
-                transform: `translate(
-                            ${randomRange(-2, 2)}px,
-                            ${randomRange(-1, 1)}px
-                        )`,
-              },
-
-              {
-                transform: "translate(0)",
-              },
-            ],
-            {
-              duration: 180,
-              easing: "steps(3)",
-            },
-          );
+          document.querySelector(".color-wash").style.filter =
+            `hue-rotate(${hue}deg)`;
         }
-      }, 3500);
+      }, 5000);
 
       /* ============================================================
    CONSOLE EASTER EGG
 ============================================================ */
 
+      console.log("%c404", "font-size:80px;font-weight:bold;color:#ff2bd6;");
+
       console.log(
-        "%c500",
-        `
-    font-size:90px;
-    font-weight:1000;
-    color:#ff1744;
-    text-shadow:5px 5px #00f5ff;
-    `,
+        "%cYou found the developer void.",
+        "font-size:18px;color:#00f5ff;",
       );
 
       console.log(
-        "%cThe server would like you to know:",
-        "font-size:16px;color:#ffe600;",
+        "%cThere is absolutely nothing useful here.",
+        "font-size:12px;color:#ffe600;",
       );
 
-      console.log(
-        "%cIT IS TRYING ITS BEST.",
-        "font-size:20px;font-weight:bold;color:#ff2bd6;",
-      );
-
-      /* ============================================================
-   INITIAL CHAOS
-============================================================ */
-
-      changeServerMood();
+      /* Initial chaos */
+      randomizeText();
     </script>
   </body>
 </html>
