@@ -6,12 +6,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.documentElement.style.setProperty('--primary-color', savedColor);
     }
 
-    const logoToggle = document.getElementById('logo_toggle');
-    const sidebar = document.getElementById('sidebar');
-    const menuItems = document.querySelectorAll('.sidebarNav .menu');
-    const logoutBtn = document.querySelector('.logout');
-    const iframe = document.querySelector('iframe[name="contentFrame"]');
-    const frameLoader = document.getElementById('frameLoader');
+    const logoToggle      = document.getElementById('logo_toggle');
+    const sidebar         = document.getElementById('sidebar');
+    const menuItems       = document.querySelectorAll('.sidebarNav .menu');
+    const logoutBtn       = document.querySelector('.logout');
+    const iframe          = document.querySelector('iframe[name="contentFrame"]');
+    const frameLoader     = document.getElementById('frameLoader');
+    const mobileHamburger = document.getElementById('mobileHamburger');
+    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 
     if (sidebar) {
         requestAnimationFrame(() => {
@@ -21,13 +23,112 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    /* ================================================================== *
+     * MOBILE SIDEBAR — hamburger / backdrop / Escape / link-click
+     * ------------------------------------------------------------------
+     * Breakpoint MUST match the CSS media query in sidebar.css (1024px).
+     * ================================================================== */
+    const MOBILE_QUERY = '(max-width: 1024px)';
+    const mobileMql    = window.matchMedia(MOBILE_QUERY);
+    const isMobileView = () => mobileMql.matches;
+
+    // Cache the <i> inside the button so we can swap bars <-> times.
+    const hamburgerIcon = mobileHamburger
+        ? mobileHamburger.querySelector('i')
+        : null;
+
+    const setHamburgerState = (open) => {
+        if (!mobileHamburger) return;
+
+        if (hamburgerIcon) {
+            hamburgerIcon.classList.toggle('fa-bars',  !open);
+            hamburgerIcon.classList.toggle('fa-times',  open);
+        }
+
+        mobileHamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        mobileHamburger.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    };
+
+    const openMobileSidebar = () => {
+        if (!sidebar) return;
+        sidebar.classList.remove('collapsed');
+        sidebar.classList.add('mobile-open');
+        if (sidebarBackdrop) sidebarBackdrop.classList.add('is-visible');
+        setHamburgerState(true);
+    };
+
+    const closeMobileSidebar = () => {
+        if (!sidebar) return;
+        sidebar.classList.remove('mobile-open');
+        if (sidebarBackdrop) sidebarBackdrop.classList.remove('is-visible');
+        setHamburgerState(false);
+    };
+
+    const toggleMobileSidebar = () => {
+        if (!sidebar) return;
+        if (sidebar.classList.contains('mobile-open')) closeMobileSidebar();
+        else openMobileSidebar();
+    };
+
+    if (mobileHamburger) {
+        mobileHamburger.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleMobileSidebar();
+        });
+    }
+
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', closeMobileSidebar);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && sidebar && sidebar.classList.contains('mobile-open')) {
+            closeMobileSidebar();
+        }
+    });
+
+    /* ---- Initial state: on a phone, always start closed and full-width. ---- */
+    if (sidebar && isMobileView()) {
+        sidebar.classList.remove('collapsed');
+        closeMobileSidebar();
+    }
+
+    /* ---- React only when the breakpoint is actually crossed. ---- */
+    let wasMobile = isMobileView();
+
+    const syncSidebarToViewport = () => {
+        if (!sidebar) return;
+
+        if (isMobileView()) {
+            closeMobileSidebar();
+            sidebar.classList.remove('collapsed');
+        } else {
+            closeMobileSidebar();
+            const collapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+            sidebar.classList.toggle('collapsed', collapsed);
+        }
+    };
+
+    const onBreakpointChange = () => {
+        const nowMobile = isMobileView();
+        if (nowMobile === wasMobile) return;
+        wasMobile = nowMobile;
+        syncSidebarToViewport();
+    };
+
+    if (typeof mobileMql.addEventListener === 'function') {
+        mobileMql.addEventListener('change', onBreakpointChange);
+    } else if (typeof mobileMql.addListener === 'function') {
+        mobileMql.addListener(onBreakpointChange);
+    }
+
     /* ------------------------------------------------------------------ *
-     * Frame loader — shows a branded spinner over the iframe while a page
-     * is fetching/parsing, so the user never sees a blank white area.
+     * Frame loader
      * ------------------------------------------------------------------ */
-    const LOADER_DELAY       = 120;   // don't flash the spinner on fast loads
-    const LOADER_MIN_VISIBLE = 250;   // avoid a 1-frame flicker
-    const LOADER_MAX_WAIT    = 6000;  // safety: never trap the user behind the spinner
+    const LOADER_DELAY       = 120;
+    const LOADER_MIN_VISIBLE = 250;
+    const LOADER_MAX_WAIT    = 6000;
 
     let loaderShowTimer = null;
     let loaderHideTimer = null;
@@ -48,7 +149,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (delay > 0) loaderShowTimer = setTimeout(reveal, delay);
         else reveal();
 
-        // If something hangs (slow image, broken API), reveal the partial page anyway
         loaderMaxTimer = setTimeout(hideFrameLoader, LOADER_MAX_WAIT);
     };
 
@@ -95,7 +195,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (savedPage && iframe.getAttribute('src') !== savedPage) {
-            showFrameLoader(0); // we're about to change src — cover the gap right away
+            showFrameLoader(0);
             iframe.src = savedPage;
         }
     }
@@ -169,8 +269,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     /* ------------------------------------------------------------------ *
-     * Prefetch: warm the HTTP cache on hover/focus so the iframe paints
-     * almost instantly when the user actually clicks.
+     * Prefetch
      * ------------------------------------------------------------------ */
     const prefetched = new Set();
 
@@ -178,7 +277,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!url || prefetched.has(url)) return;
         prefetched.add(url);
         fetch(url, { credentials: 'same-origin', priority: 'low' })
-            .catch(() => { /* ignore — this is an optimisation only */ });
+            .catch(() => { });
     };
 
     menuItems.forEach(item => {
@@ -195,13 +294,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             e.preventDefault();
 
+            if (isMobileView()) closeMobileSidebar();
+
             if (iframe.getAttribute('src') === pageUrl) return;
 
             menuItems.forEach(i => i.classList.remove('active'));
             this.classList.add('active');
             localStorage.setItem('activePage', pageUrl);
 
-            // Start the network request immediately — no waiting on animation.
             showFrameLoader();
             iframe.src = pageUrl;
         });
@@ -216,6 +316,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (logoToggle && sidebar) {
         logoToggle.addEventListener('click', () => {
+            if (isMobileView()) return;
+
             sidebar.classList.toggle('collapsed');
 
             const collapsed = sidebar.classList.contains('collapsed');
@@ -234,7 +336,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 confirmText: 'Log out',
                 cancelText: 'Cancel',
                 danger: true
-            },true);
+            }, true);
             if (!ok) return;
 
             try {
