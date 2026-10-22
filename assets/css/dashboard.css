@@ -586,8 +586,8 @@ body {
 }
 
 /* ============================================================
-   MOBILE (≤900px) — Switches to a flex column layout to prevent
-   grid rows from aggressively collapsing content under 100vh.
+   MOBILE (≤900px) — Switch layout so loaded content AND skeleton
+   match structurally, preventing aggressive squishing.
    ============================================================ */
 @media (max-width: 900px) {
   html,
@@ -599,7 +599,7 @@ body {
   html .dashboardContent {
     display: flex;
     flex-direction: column;
-    height: 100dvh; /* Adapts properly to mobile toolbars */
+    height: 100dvh;
     padding: 16px;
     gap: 16px;
     overflow-y: auto !important;
@@ -620,21 +620,39 @@ body {
     background: transparent;
   }
 
-  /* Flex-shrink 0 ensures items stretch to intrinsic height instead of collapsing */
+  /* Match skeleton overall structure to content structure */
+  html .dashboardContent .dashboardSkeleton {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 16px;
+  }
+  .dashboardContent .skeletonStatsRow {
+    flex-shrink: 0;
+  }
+
+  /* Stats grids (both loaded and skeleton) become 2 columns */
   .dashboardContent .statsGrid,
   .dashboardContent .statsGrid.grid3,
   .dashboardContent .statsGrid.grid4,
-  .dashboardContent .statsGrid.grid5 {
+  .dashboardContent .statsGrid.grid5,
+  .dashboardContent .skeletonWideCard {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
     flex-shrink: 0;
   }
 
+  /* Tweak skeleton stats padding */
+  .dashboardContent .skeletonWideCard {
+    padding: 14px;
+  }
+
   /* --- Neat mobile cards: scalable padding, natural flex heights --- */
   .dashboardContent .statCard {
     padding: 14px;
-    height: max-content; /* Prevents text overflow */
+    height: max-content;
   }
 
   .dashboardContent .statCard .statTop {
@@ -665,7 +683,9 @@ body {
     padding: 3px 6px;
   }
 
-  .dashboardContent .chartsGrid {
+  /* Charts rows (both loaded and skeleton) become stacked flex columns */
+  .dashboardContent .chartsGrid,
+  .dashboardContent .skeletonChartsRow {
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -673,24 +693,28 @@ body {
   }
 
   .dashboardContent .chartsGrid .pieChartCard,
-  .dashboardContent .chartsGrid .barChartCard {
+  .dashboardContent .chartsGrid .barChartCard,
+  .dashboardContent .skeletonChartCard {
     min-height: 380px;
   }
 }
 
 /* ============================================================
-   VERY SMALL (≤600px) — 1 column stacking
+   VERY SMALL (≤600px) — 1 column stacking for stats and charts
    ============================================================ */
 @media (max-width: 600px) {
+  /* Stack to 1 column for loaded stats and skeleton stats */
   .dashboardContent .statsGrid,
   .dashboardContent .statsGrid.grid3,
   .dashboardContent .statsGrid.grid4,
-  .dashboardContent .statsGrid.grid5 {
+  .dashboardContent .statsGrid.grid5,
+  .dashboardContent .skeletonWideCard {
     grid-template-columns: 1fr;
   }
 
   .dashboardContent .chartsGrid .pieChartCard,
-  .dashboardContent .chartsGrid .barChartCard {
-    min-height: 420px; /* Give pie chart room to breathe vertically */
+  .dashboardContent .chartsGrid .barChartCard,
+  .dashboardContent .skeletonChartCard {
+    min-height: 420px;
   }
 }
