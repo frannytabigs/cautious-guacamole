@@ -18,6 +18,18 @@
  *   - Grounds: can confirm GROUNDS only (requires office confirmed first),
  *              can unconfirm GROUNDS, can add/edit GROUNDS remarks only.
  *   - Payer remarks are read-only via this API.
+ *
+ * Concurrency model:
+ *   - Confirm/unconfirm actions are single-statement atomic UPDATEs with
+ *     their business preconditions folded into the WHERE clause. There is
+ *     no read-then-write race; the DB is the source of truth for whether
+ *     the action is valid, and rowCount() == 0 means "lost the race or
+ *     precondition unmet" — we then do a follow-up SELECT only to produce
+ *     a useful error message (not for correctness).
+ *   - DELETE is a single UPDATE with deleted_at IS NULL guard (already safe).
+ *   - POST relies on the UNIQUE(reference_number) constraint for duplicate
+ *     prevention, and ImageManager's unique filename suffixing for image
+ *     safety (a losing POST deletes only its own file).
  */
 
 define('ITS_ME_JUSTTOVERIFY', true);
@@ -135,6 +147,25 @@ function formatPayment($row)
         'grounds_staff_id'      => $row['confirmed_ground_staff'],
         'grounds_staff_name'    => $row['ground_staff_name'],
     ];
+}
+
+/**
+ * Read current confirmation state — used ONLY to produce error messages
+ * after a failed atomic UPDATE. Never use this to decide whether an
+ * action is allowed: by the time you act, the state may have changed.
+ * Correctness comes from the UPDATE's WHERE clause.
+ *
+ * @return array|false  ['confirmed_office_staff'=>?, 'confirmed_ground_staff'=>?] or false if not found / deleted.
+ */
+function getPaymentConfirmationState($pdo, $paymentId)
+{
+    $stmt = $pdo->prepare("
+        SELECT confirmed_office_staff, confirmed_ground_staff
+        FROM payments
+        WHERE payment_id = ? AND deleted_at IS NULL
+    ");
+    $stmt->execute([$paymentId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
 // -----------------------------------------------------------------------------
@@ -332,6 +363,13 @@ try {
             $imageLink = $uploadResult['url'];
             $filename  = $uploadResult['filename'];
 
+            // Isolate the INSERT so that only a failed INSERT triggers image
+            // cleanup. If systemLog() or Response::success() fail AFTER the
+            // row is committed, we must NOT delete the image (the row still
+            // points to it). ImageManager guarantees the filename is unique
+            // to this request, so a losing POST's cleanup only removes its
+            // own file, never the winner's.
+            $newId = null;
             try {
                 $stmt = $pdo->prepare("
                     INSERT INTO payments 
@@ -353,12 +391,16 @@ try {
                     $remarks
                 ]);
                 $newId = $pdo->lastInsertId();
-
-                systemLog("Uploaded payment proof: $refNum", 'Public');
-                Response::success('Payment proof submitted successfully. Pending office review.', ['payment_id' => $newId], 201);
             } catch (PDOException $e) {
-                if (isset($filename)) {
-                    $imageManager->deleteImage($filename);
+                $cleanup = $imageManager->deleteImage($filename);
+                if (empty($cleanup['success'])) {
+                    // Non-fatal — the request is failing anyway. Log so we
+                    // can sweep orphaned images manually or via cron.
+                    systemLog(
+                        "Orphaned image cleanup failed for $filename: "
+                            . ($cleanup['error'] ?? 'unknown'),
+                        'System'
+                    );
                 }
                 if ($e->getCode() == 23000) {
                     Response::error('Conflict: Reference number already exists.', 409);
@@ -366,6 +408,9 @@ try {
                 systemLog("Payment creation error: " . $e->getMessage(), 'System');
                 Response::error('Database error while creating payment.', 500);
             }
+
+            systemLog("Uploaded payment proof: $refNum", 'Public');
+            Response::success('Payment proof submitted successfully. Pending office review.', ['payment_id' => $newId], 201);
             break;
 
         // ---------- PUT ----------
@@ -387,6 +432,11 @@ try {
 
                 // -------------------------------------------------------------
                 // OFFICE verification — admin or office.
+                //
+                // Atomic: the "confirmed_office_staff IS NULL" guard means
+                // only the FIRST concurrent caller wins. A second tap (from
+                // the same or another device) receives a 409 instead of a
+                // silent re-write + duplicate audit log.
                 // -------------------------------------------------------------
                 case 'confirm_office':
                     requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
@@ -396,9 +446,24 @@ try {
                         SET confirmed_office_staff = ?, 
                             remarks_office = COALESCE(?, remarks_office),
                             updated_by = ?
-                        WHERE payment_id = ? AND deleted_at IS NULL
+                        WHERE payment_id = ? 
+                          AND deleted_at IS NULL
+                          AND confirmed_office_staff IS NULL
                     ");
                     $stmt->execute([$userId, $input['remarks_office'] ?? null, $userId, $resourceId]);
+
+                    if ($stmt->rowCount() === 0) {
+                        // Post-mortem SELECT — for error messaging only.
+                        $state = getPaymentConfirmationState($pdo, $resourceId);
+                        if (!$state) {
+                            Response::error('Payment not found or already deleted.', 404);
+                        }
+                        if (!empty($state['confirmed_office_staff'])) {
+                            Response::error('Payment is already confirmed by office.', 409);
+                        }
+                        Response::error('Could not confirm payment. Please retry.', 409);
+                    }
+
                     systemLog($userData['name'] . " confirmed payment receipt for ID: $resourceId", $userId);
                     Response::success('Payment confirmed by Office.');
                     break;
@@ -407,29 +472,42 @@ try {
                 // OFFICE unconfirm — admin or office.
                 // Blocked if grounds already confirmed, for EVERYONE (incl. admin).
                 // To fully undo, admin must unconfirm grounds first, then office.
+                //
+                // Atomic: both preconditions are in the WHERE clause:
+                //   - confirmed_ground_staff IS NULL  → grounds not yet done
+                //   - confirmed_office_staff IS NOT NULL → office currently set
                 // -------------------------------------------------------------
                 case 'unconfirm_office':
                     requireRole([ROLE_ADMIN, ROLE_OFFICE], $role);
-
-                    $check = $pdo->prepare("
-                        SELECT confirmed_ground_staff FROM payments 
-                        WHERE payment_id = ? AND deleted_at IS NULL
-                    ");
-                    $check->execute([$resourceId]);
-                    if ($check->fetchColumn()) {
-                        Response::error(
-                            'Cannot unconfirm office: grounds staff has already completed work. Unconfirm grounds first.',
-                            409
-                        );
-                    }
 
                     $stmt = $pdo->prepare("
                         UPDATE payments 
                         SET confirmed_office_staff = NULL,
                             updated_by = ?
-                        WHERE payment_id = ? AND deleted_at IS NULL
+                        WHERE payment_id = ? 
+                          AND deleted_at IS NULL
+                          AND confirmed_office_staff IS NOT NULL
+                          AND confirmed_ground_staff IS NULL
                     ");
                     $stmt->execute([$userId, $resourceId]);
+
+                    if ($stmt->rowCount() === 0) {
+                        $state = getPaymentConfirmationState($pdo, $resourceId);
+                        if (!$state) {
+                            Response::error('Payment not found or already deleted.', 404);
+                        }
+                        if (!empty($state['confirmed_ground_staff'])) {
+                            Response::error(
+                                'Cannot unconfirm office: grounds staff has already completed work. Unconfirm grounds first.',
+                                409
+                            );
+                        }
+                        if (empty($state['confirmed_office_staff'])) {
+                            Response::error('Payment is not currently confirmed by office.', 409);
+                        }
+                        Response::error('Could not revert payment confirmation. Please retry.', 409);
+                    }
+
                     systemLog($userData['name'] . " unconfirmed payment receipt for ID: $resourceId", $userId);
                     Response::success('Payment confirmation reverted.');
                     break;
@@ -437,36 +515,50 @@ try {
                 // -------------------------------------------------------------
                 // GROUNDS verification — admin or grounds.
                 // Office must be confirmed FIRST — for EVERYONE (incl. admin).
+                //
+                // Atomic: "office IS NOT NULL" enforces the ordering invariant
+                // even if office and grounds staff tap simultaneously.
                 // -------------------------------------------------------------
                 case 'confirm_grounds':
                     requireRole([ROLE_ADMIN, ROLE_GROUNDS], $role);
-
-                    $check = $pdo->prepare("
-                        SELECT confirmed_office_staff FROM payments 
-                        WHERE payment_id = ? AND deleted_at IS NULL
-                    ");
-                    $check->execute([$resourceId]);
-                    if (!$check->fetchColumn()) {
-                        Response::error(
-                            'Cannot complete ground work: Payment not confirmed by office yet. Confirm office first.',
-                            400
-                        );
-                    }
 
                     $stmt = $pdo->prepare("
                         UPDATE payments 
                         SET confirmed_ground_staff = ?, 
                             remarks_grounds = COALESCE(?, remarks_grounds),
                             updated_by = ?
-                        WHERE payment_id = ? AND deleted_at IS NULL
+                        WHERE payment_id = ? 
+                          AND deleted_at IS NULL
+                          AND confirmed_office_staff IS NOT NULL
+                          AND confirmed_ground_staff IS NULL
                     ");
                     $stmt->execute([$userId, $input['remarks_grounds'] ?? null, $userId, $resourceId]);
+
+                    if ($stmt->rowCount() === 0) {
+                        $state = getPaymentConfirmationState($pdo, $resourceId);
+                        if (!$state) {
+                            Response::error('Payment not found or already deleted.', 404);
+                        }
+                        if (empty($state['confirmed_office_staff'])) {
+                            Response::error(
+                                'Cannot complete ground work: Payment not confirmed by office yet. Confirm office first.',
+                                400
+                            );
+                        }
+                        if (!empty($state['confirmed_ground_staff'])) {
+                            Response::error('Ground work is already confirmed.', 409);
+                        }
+                        Response::error('Could not confirm ground work. Please retry.', 409);
+                    }
+
                     systemLog($userData['name'] . " confirmed ground work for ID: $resourceId", $userId);
                     Response::success('Work completion confirmed by Grounds.');
                     break;
 
                 // -------------------------------------------------------------
                 // GROUNDS unconfirm — admin or grounds.
+                //
+                // Atomic: only succeeds if grounds is currently set.
                 // -------------------------------------------------------------
                 case 'unconfirm_grounds':
                     requireRole([ROLE_ADMIN, ROLE_GROUNDS], $role);
@@ -475,9 +567,23 @@ try {
                         UPDATE payments 
                         SET confirmed_ground_staff = NULL,
                             updated_by = ?
-                        WHERE payment_id = ? AND deleted_at IS NULL
+                        WHERE payment_id = ? 
+                          AND deleted_at IS NULL
+                          AND confirmed_ground_staff IS NOT NULL
                     ");
                     $stmt->execute([$userId, $resourceId]);
+
+                    if ($stmt->rowCount() === 0) {
+                        $state = getPaymentConfirmationState($pdo, $resourceId);
+                        if (!$state) {
+                            Response::error('Payment not found or already deleted.', 404);
+                        }
+                        if (empty($state['confirmed_ground_staff'])) {
+                            Response::error('Ground work is not currently confirmed.', 409);
+                        }
+                        Response::error('Could not revert ground work confirmation. Please retry.', 409);
+                    }
+
                     systemLog($userData['name'] . " unconfirmed ground work for ID: $resourceId", $userId);
                     Response::success('Ground work confirmation reverted.');
                     break;
@@ -488,6 +594,12 @@ try {
                 //   Grounds → may only edit GROUNDS remarks.
                 //   Admin   → may edit any (office / grounds / admin).
                 //   Payer remarks are read-only.
+                //
+                // Concurrency: this is intentionally last-write-wins. Two
+                // simultaneous edits by the same role overwrite each other,
+                // which is acceptable for a free-text note field. If you
+                // need it to be lossless, add optimistic locking via a
+                // version column and require the client to send it.
                 // -------------------------------------------------------------
                 case 'edit_remark':
                     $remarkType = strtolower(trim((string) ($input['remark_type'] ?? '')));
@@ -547,6 +659,13 @@ try {
                 // General detail edit (admin + office).
                 // Remarks are NOT touched here — they must go through
                 // `edit_remark` so the per-role rules above are enforced.
+                //
+                // Concurrency: COALESCE(?, column) means "skip this field if
+                // the client sent null". So two concurrent editors touching
+                // DIFFERENT fields do not clobber each other. If your client
+                // sends the full row every time, this is last-write-wins per
+                // field — add optimistic locking (version column) if that
+                // matters for your workflow.
                 // -------------------------------------------------------------
                 case 'edit_details':
                 default:
@@ -603,6 +722,8 @@ try {
                 Response::error('Payment ID required.', 400);
             }
 
+            // Already atomic — the deleted_at IS NULL guard means a second
+            // concurrent delete gets rowCount() === 0 and a clean 404.
             $stmt = $pdo->prepare("
                 UPDATE payments 
                 SET deleted_at = NOW(), updated_by = ? 
