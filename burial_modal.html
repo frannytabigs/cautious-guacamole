@@ -1,0 +1,224 @@
+<script>
+    // This file is loaded via fetch() + DOMParser and injected as a fragment.
+    // Scripts in fetched HTML do NOT execute (DOMParser blocks them), so this
+    // line is silent during normal modal use.
+    //
+    // When someone navigates to burial_modal.html directly, this file is parsed
+    // as a real document, this script runs, and we bounce them to the shell.
+    // admin.html's check_user.js will route them to their own role page
+    // (grounds / office) or to login.html if their session is invalid.
+    if (window.self === window.top) location.replace('admin.html');
+</script>
+<div class="modalOverlay" id="burial_modal_overlay">
+    <form id="burial_clearance_form">
+        <div class="paperForm">
+            <div class="formTitle">BURIAL CLEARANCE</div>
+
+            <div class="row">
+                <div class="col">
+                    <label>Date:</label>
+                    <input type="date" id="burial_clearance_date">
+                </div>
+                <div class="col">
+                    <label>Control No.</label>
+                    <input type="text" id="control_number" readonly>
+                </div>
+            </div>
+
+            <div class="sectionTitle">REQUESTING PARTY (Contact Details)</div>
+            <div class="row">
+                <div class="col">
+                    <label class="required">That I (Full Name):</label>
+                    <input type="text" id="contact_person_name" pattern="[A-Za-zÀ-ÖØ-öø-ÿ\s'.-]+" title="Letters only, please." required>
+                </div>
+                <div class="col">
+                    <label class="required">Purok / Zone / Street Name:</label>
+                    <input type="text" id="contact_person_address" required>
+                </div>
+                <div class="col">
+                    <label class="required">Barangay Address:</label>
+                    <select id="contact_person_address_barangay" required>
+                        <option value="" disabled selected>Select Barangay...</option>
+                        <option value="Alang-alang">Alang-alang</option>
+                        <option value="Bakilid">Bakilid</option>
+                        <option value="Banilad">Banilad</option>
+                        <option value="Basak">Basak</option>
+                        <option value="Cabancalan">Cabancalan</option>
+                        <option value="Cambaro">Cambaro</option>
+                        <option value="Canduman">Canduman</option>
+                        <option value="Casuntingan">Casuntingan</option>
+                        <option value="Casili">Casili</option>
+                        <option value="Centro">Centro</option>
+                        <option value="Cubacub">Cubacub</option>
+                        <option value="Guizo">Guizo</option>
+                        <option value="Ibabao-Estancia">Ibabao-Estancia</option>
+                        <option value="Jagobiao">Jagobiao</option>
+                        <option value="Labogon">Labogon</option>
+                        <option value="Looc">Looc</option>
+                        <option value="Maguikay">Maguikay</option>
+                        <option value="Mantuyong">Mantuyong</option>
+                        <option value="Opao">Opao</option>
+                        <option value="Pakna-an">Pakna-an</option>
+                        <option value="Pagsabungan">Pagsabungan</option>
+                        <option value="Subangdaku">Subangdaku</option>
+                        <option value="Tabok">Tabok</option>
+                        <option value="Tingub">Tingub</option>
+                        <option value="Tipolo">Tipolo</option>
+                        <option value="Umapad">Umapad</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col">
+                    <label class="required">Phone Number:</label>
+                    <input type="text" id="contact_person_phone_number" required>
+                </div>
+                <div class="col">
+                    <label class="required">Email Address:</label>
+                    <input type="email" id="contact_person_email" autocomplete="email" required>
+                </div>
+                <div class="col">
+                    <label class="required">Seeking assistance in the form of:</label>
+                    <select id="assistance_type" required>
+                        <option value="Burial">Burial of the late</option>
+                        <option value="Transfer the remains of the late">Transfer the remains of the late to the bone chamber</option>
+                        <option value="Other">Other...</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="sectionTitle">DECEASED INFORMATION</div>
+            <div class="row">
+                <div class="col">
+                    <label class="required">Name of Deceased:</label>
+                    <input type="text" id="deceased_name" placeholder="Full Name" pattern="[A-Za-zÀ-ÖØ-öø-ÿ\s'.-]+" title="Letters only, please." required>
+                </div>
+                <div class="col">
+                    <label class="required">Sex:</label>
+                    <select id="deceased_sex" required>
+                        <option value="" disabled selected>Select...</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Unknown">Unknown</option>
+                    </select>
+                </div>
+                <div class="col">
+                    <label class="required">Date of Birth:</label>
+                    <input type="date" id="deceased_date_of_birth" required>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col">
+                    <label class="required">Last Known Address:</label>
+                    <input type="text" id="last_known_address" required>
+                </div>
+                <div class="col">
+                    <label class="required">Date of Death:</label>
+                    <input type="date" id="deceased_date_of_death" required>
+                </div>
+                <div class="col">
+                    <label class="required">Death Certificate No:</label>
+                    <input type="text" id="death_certificate" required>
+                </div>
+            </div>
+
+            <div class="sectionTitle">PERMITS &amp; REQUIREMENTS</div>
+            <div class="row">
+                <div class="col">
+                    <label class="required">Burial Permit No.</label>
+                    <input type="text" id="burial_permit_number" required>
+                </div>
+                <div class="col">
+                    <label class="required">Burial Permit Date</label>
+                    <input type="date" id="burial_permit_date" required>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <label>Transfer Permit No.</label>
+                    <input type="text" id="transfer_permit_number">
+                </div>
+                <div class="col">
+                    <label>Transfer Permit Issued By</label>
+                    <input type="text" id="transfer_permit_issued_by">
+                </div>
+                <div class="col">
+                    <label>Transfer Permit Issued On</label>
+                    <input type="date" id="transfer_permit_date">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <label>Exhumation Permit No.</label>
+                    <input type="text" id="exhumation_permit_number">
+                </div>
+                <div class="col">
+                    <label>Exhumation Permit Date</label>
+                    <input type="date" id="exhumation_permit_date">
+                </div>
+            </div>
+
+            <div class="sectionTitle">LOCATION ASSIGNMENT</div>
+            <div class="row">
+                <div class="col">
+                    <label>Burial Type:</label>
+                    <select id="burial_block">
+                        <option value="" selected>Select Burial Type...</option>
+                        <option>Niche</option>
+                        <option>Bone Chamber</option>
+                        <option>Lawn/Grounds</option>
+                        <option>Unmapped Area</option>
+                        <option>Private</option>
+                        <option>Mausoleum</option>
+                        <option>Mass Grave</option>
+                        <option>Cluster</option>
+                        <option>Block</option>
+                    </select>
+                </div>
+                <div class="col">
+                    <label>Block:</label>
+                    <select id="block">
+                        <option value="" selected>Select Block...</option>
+                    </select>
+                </div>
+                <div class="col">
+                    <label>Grave Code:</label>
+                    <input type="text" id="grave_code" readonly autocomplete="off">
+                    <input type="hidden" id="current_grave_id">
+                    <small class="fieldHint" id="grave_code_hint" role="status" aria-live="polite"></small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <label>Date of Interment:</label>
+                    <input type="date" id="date_buried">
+                </div>
+                <div class="col">
+                    <label>Expiration Date:</label>
+                    <input type="date" id="lease_expiration_date" readonly required>
+                </div>
+                <div class="col">
+                    <label class="required">Status:</label>
+                    <select id="status" required>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="sectionTitle">REMARKS</div>
+            <div class="row">
+                <div class="col">
+                    <input type="text" id="remarks">
+                </div>
+            </div>
+
+            <div class="paperFormActions">
+                <button type="button" class="paperCancelBtn">Cancel</button>
+                <button type="submit" class="paperSaveBtn">Save</button>
+            </div>
+        </div>
+    </form>
+</div>
