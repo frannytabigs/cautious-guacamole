@@ -2,43 +2,16 @@
  * grounds-payments.js
  *
  * Grounds Staff view of the Payments page.
- *
- * Tab structure (unchanged):
- *   Tab 1 — pending_grounds  → Confirm button (grounds staff's queue)
- *   Tab 2 — pending_office   → Read-only notice (waiting for office)
- *   Tab 3 — verified         → Verified pill + Undo button (grounds can revert)
- *
- * Enhancements added to match the admin / office controllers:
- *   • Proof-of-payment cell → clickable lightbox with broken-image detection
- *   • Phone cell → clickable SMS link (opens shared SMS modal)
- *   • Row-busy state → dims + disables the whole <tr> while a request runs
- *   • All CSS injected in-page (no external stylesheet dependency)
- *
- * Permissions (enforced server-side in payments.php):
- *   - Confirm grounds     → ROLE_ADMIN, ROLE_GROUNDS
- *   - Undo grounds        → ROLE_ADMIN, ROLE_GROUNDS
- *   - Edit grounds remark → ROLE_ADMIN, ROLE_GROUNDS
- *   - Edit office remark  → ROLE_ADMIN, ROLE_OFFICE (grounds: forbidden)
- *   - Payer remark        → read-only
- *   - Delete              → ROLE_ADMIN only (not exposed here)
- *
- * Endpoints:
- *   GET  api/payments.php?status=<tab>&page=<n>&limit=<n>&search_term=<q>
- *   PUT  api/payments.php?path_info=<id>  { action: "confirm_grounds"   }
- *   PUT  api/payments.php?path_info=<id>  { action: "unconfirm_grounds" }
- *   PUT  api/payments.php?path_info=<id>  { action: "edit_remark", ... }
  */
 (() => {
   "use strict";
 
-  // ------------------------------------------------------------------ config
   const API_URL = "api/payments.php";
   const PER_PAGE = 10;
   const SEARCH_MIN_LEN = 3;
   const SEARCH_DEBOUNCE_MS = 350;
   const REQUEST_TIMEOUT_MS = 30000;
   const REMARK_MAX_LEN = 2000;
-
   const SEARCH_PLACEHOLDER = "Search...";
 
   const TABS = {
@@ -47,7 +20,6 @@
       status: "pending_grounds",
       canConfirm: true,
       confirmAction: "confirm_grounds",
-      roleCheck: roleIsGrounds,
       confirmPrompt: {
         title: "Confirm Grounds Completion?",
         message:
@@ -66,7 +38,6 @@
       canConfirm: false,
       canUndo: true,
       undoAction: "unconfirm_grounds",
-      roleCheck: roleIsGrounds,
       undoPrompt: {
         title: "Undo Grounds Verification?",
         message:
@@ -77,7 +48,6 @@
     },
   };
 
-  // ------------------------------------------------------------------ state
   const state = {
     activeTab: "pending_grounds",
     page: 1,
@@ -91,7 +61,6 @@
     editingSection: null,
   };
 
-  // ------------------------------------------------------------------ DOM
   const el = {
     tabButtons: document.querySelectorAll(".subnavBtn[data-tab]"),
     search: document.getElementById("payment_search"),
@@ -106,12 +75,8 @@
     carouselTrack: document.getElementById("carousel_track"),
   };
 
-  if (!el.tbody) {
-    console.warn("[grounds-payments] tbody missing; aborting.");
-    return;
-  }
+  if (!el.tbody) return;
 
-  // ------------------------------------------------------------------ helpers
   const escapeHtml = (value) => {
     if (value === null || value === undefined) return "";
     return String(value)
@@ -133,42 +98,13 @@
 
   const truncate = (text, max) => {
     const s = String(text || "");
-    if (s.length <= max) return s;
-    return s.slice(0, max - 1) + "\u2026";
-  };
-
-  const GENERIC_ERROR = "Something went wrong. Please try again.";
-
-  const looksRawMessage = (text) => {
-    if (!text) return true;
-    const t = String(text).trim();
-    if (!t) return true;
-    if (/<\s*[a-z!][\s\S]*>/i.test(t)) return true;
-    if (/ERR_NGROK_|ngrok/i.test(t)) return true;
-    if (/^HTTP\s+\d{3}/i.test(t)) return true;
-    if (/^Request failed \(\d{3}\)$/i.test(t)) return true;
-    if (
-      /non-JSON|Unexpected token|is not valid JSON|Unexpected end of JSON/i.test(
-        t,
-      )
-    )
-      return true;
-    if (/Failed to fetch|NetworkError|Load failed/i.test(t)) return true;
-    if (
-      /^(TypeError|SyntaxError|ReferenceError|RangeError|DOMException)\b/i.test(
-        t,
-      )
-    )
-      return true;
-    if (t.length > 200) return true;
-    return false;
+    return s.length <= max ? s : s.slice(0, max - 1) + "\u2026";
   };
 
   const friendlyMessage = (err, fallback) => {
-    if (!err) return fallback || GENERIC_ERROR;
-    const msg =
-      err && err.message ? String(err.message).trim() : String(err).trim();
-    if (!msg || looksRawMessage(msg)) return fallback || GENERIC_ERROR;
+    if (!err) return fallback || "Something went wrong.";
+    const msg = err.message ? String(err.message).trim() : String(err).trim();
+    if (!msg || msg.length > 200) return fallback || "Something went wrong.";
     return msg;
   };
 
@@ -178,11 +114,8 @@
         window.showAlertTOP(message, type);
         return;
       }
-    } catch (_) {
-      /* ignore */
-    }
-    if (type === "error") console.error(message);
-    else console.log(message);
+    } catch (_) {}
+    type === "error" ? console.error(message) : console.log(message);
   };
 
   const debounce = (fn, wait) => {
@@ -204,10 +137,10 @@
       ms || REQUEST_TIMEOUT_MS,
     );
     try {
-      const opts = Object.assign({}, options || {}, {
-        signal: controller.signal,
-      });
-      return await fetch(url, opts);
+      return await fetch(
+        url,
+        Object.assign({}, options || {}, { signal: controller.signal }),
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -220,61 +153,20 @@
     return window.confirm(message);
   }
 
-  // ------------------------------------------------------------------ role
-  function getUserRole() {
-    const candidates = [
-      window.currentUser && window.currentUser.role,
-      window.userData && window.userData.role,
-      window.__USER__ && window.__USER__.role,
-      document.body && document.body.dataset && document.body.dataset.userRole,
-      document.documentElement &&
-        document.documentElement.dataset &&
-        document.documentElement.dataset.userRole,
-    ];
-    for (let i = 0; i < candidates.length; i++) {
-      if (candidates[i]) return String(candidates[i]).toLowerCase();
-    }
-    return "";
-  }
-
-  function roleIsGrounds() {
-    const role = getUserRole();
-    if (!role) return true; // unknown → optimistic; backend enforces
-    return role.includes("grounds");
-  }
-
   function currentTabCanConfirm() {
-    const tabCfg = TABS[state.activeTab];
-    if (!tabCfg || !tabCfg.canConfirm) return false;
-    try {
-      return !!tabCfg.roleCheck();
-    } catch (_) {
-      return false;
-    }
+    return !!(TABS[state.activeTab] && TABS[state.activeTab].canConfirm);
   }
 
   function currentTabCanUndo() {
-    const tabCfg = TABS[state.activeTab];
-    if (!tabCfg || !tabCfg.canUndo) return false;
-    try {
-      return !!tabCfg.roleCheck();
-    } catch (_) {
-      return false;
-    }
+    return !!(TABS[state.activeTab] && TABS[state.activeTab].canUndo);
   }
 
-  /** Grounds can edit only their own remark; office/admin/payer are read-only. */
   function canEditRemark(type) {
-    if (type !== "grounds") return false;
-    const role = getUserRole();
-    if (!role) return true; // unknown → optimistic; backend enforces
-    return role.includes("grounds");
+    return type === "grounds";
   }
 
-  // ------------------------------------------------------------------ busy state
   function enterRowBusy(btn) {
     if (!btn) return function noop() {};
-
     const row = btn.closest("tr");
     const group = btn.closest(".pmActionGroup");
 
@@ -313,10 +205,9 @@
 
     return function restore() {
       buttons.forEach((b, i) => {
-        const snap = snapshot[i];
-        if (!snap) return;
-        b.innerHTML = snap.html;
-        b.disabled = snap.disabled;
+        if (!snapshot[i]) return;
+        b.innerHTML = snapshot[i].html;
+        b.disabled = snapshot[i].disabled;
       });
       if (row) {
         row.classList.remove("pmRowBusy");
@@ -326,656 +217,106 @@
     };
   }
 
-  // ------------------------------------------------------------------ styles
   function injectStyles() {
     if (document.getElementById("groundsPaymentsStyles")) return;
     const style = document.createElement("style");
     style.id = "groundsPaymentsStyles";
     style.textContent = `
-      /* ============================================================
-         Status badges
-         ============================================================ */
-      .pmStatusBadge {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 600;
-        line-height: 1;
-        white-space: nowrap;
-        border: 1px solid transparent;
-        vertical-align: middle;
-      }
+      .pmStatusBadge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; border: 1px solid transparent; vertical-align: middle; }
       .pmStatusBadge i { font-size: 11px; }
-      .pmStatus--pendingOffice  { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+      .pmStatus--pendingOffice { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
       .pmStatus--pendingGrounds { background: #ffedd5; color: #9a3412; border-color: #fed7aa; }
-      .pmStatus--completed      { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
-
-      /* ============================================================
-         Action column
-         ============================================================ */
-      .pmActionGroup {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        flex-wrap: nowrap;
-        white-space: nowrap;
-        line-height: 1;
-      }
-
-      .pmActionBtn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        padding: 0;
-        margin: 0;
-        font-size: 13px;
-        font-family: inherit;
-        color: #606770;
-        background: transparent;
-        border: 1px solid transparent;
-        border-radius: 8px;
-        cursor: pointer;
-        flex: 0 0 auto;
-        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-      }
+      .pmStatus--completed { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+      .pmActionGroup { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; line-height: 1; }
+      .pmActionBtn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; margin: 0; font-size: 13px; font-family: inherit; color: #606770; background: transparent; border: 1px solid transparent; border-radius: 8px; cursor: pointer; flex: 0 0 auto; transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
       .pmActionBtn i { line-height: 1; pointer-events: none; }
       .pmActionBtn:hover { background: #f8fafc; border-color: #e5e7eb; color: #1c1e21; }
       .pmActionBtn:active { transform: translateY(1px); }
       .pmActionBtn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15); }
-      .pmActionBtn--verify:hover,
-      .pmActionBtn--verify:focus-visible { background: #eff6ff; border-color: #dbeafe; color: #2563eb; }
-      .pmActionBtn--unverify:hover,
-      .pmActionBtn--unverify:focus-visible { background: #fff7ed; border-color: #fed7aa; color: #d97706; }
-
-      /* ============================================================
-         Row-busy state
-         ============================================================ */
-      tr.pmRowBusy {
-        opacity: 0.55;
-        cursor: progress;
-        user-select: none;
-        transition: opacity 0.15s ease;
-      }
-      tr.pmRowBusy .pmActionGroup,
-      tr.pmRowBusy .pmRemarksCell,
-      tr.pmRowBusy .pmProofCell,
-      tr.pmRowBusy .smsPhoneLink {
-        pointer-events: none;
-      }
-      tr.pmRowBusy .pmActionBtn {
-        cursor: progress;
-      }
-
-      /* ============================================================
-         Verified pill
-         ============================================================ */
-      .pmVerifiedPill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 32px;
-        padding: 0 12px;
-        border-radius: 8px;
-        font-size: 12.5px;
-        font-weight: 600;
-        line-height: 1;
-        white-space: nowrap;
-        background: #16a34a;
-        color: #ffffff;
-        cursor: default;
-        user-select: none;
-        flex: 0 0 auto;
-        vertical-align: middle;
-        border: 1px solid #16a34a;
-      }
+      .pmActionBtn--verify:hover, .pmActionBtn--verify:focus-visible { background: #eff6ff; border-color: #dbeafe; color: #2563eb; }
+      .pmActionBtn--unverify:hover, .pmActionBtn--unverify:focus-visible { background: #fff7ed; border-color: #fed7aa; color: #d97706; }
+      tr.pmRowBusy { opacity: 0.55; cursor: progress; user-select: none; transition: opacity 0.15s ease; }
+      tr.pmRowBusy .pmActionGroup, tr.pmRowBusy .pmRemarksCell, tr.pmRowBusy .pmProofCell, tr.pmRowBusy .smsPhoneLink { pointer-events: none; }
+      tr.pmRowBusy .pmActionBtn { cursor: progress; }
+      .pmVerifiedPill { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; line-height: 1; white-space: nowrap; background: #16a34a; color: #ffffff; cursor: default; user-select: none; flex: 0 0 auto; vertical-align: middle; border: 1px solid #16a34a; }
       .pmVerifiedPill i { font-size: 13px; line-height: 1; }
-
-      /* ============================================================
-         Proof-of-payment cell
-         ============================================================ */
-      .pmProofCell {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 60px;
-        height: 60px;
-        border-radius: 6px;
-        overflow: hidden;
-        cursor: pointer;
-        background: #f1f5f9;
-        border: 1px solid #e5e7eb;
-        position: relative;
-        vertical-align: middle;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease;
-      }
-      .pmProofCell:hover {
-        border-color: var(--mainColor, #2563eb);
-        box-shadow: 0 2px 10px rgba(37, 99, 235, 0.20);
-      }
-      .pmProofCell:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30);
-      }
-      .pmProofThumb {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-      .pmProofBroken {
-        display: none;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        gap: 3px;
-        width: 100%;
-        height: 100%;
-        color: #dc2626;
-        font-size: 16px;
-        background: #fef2f2;
-      }
-      .pmProofBroken small {
-        font-size: 8.5px;
-        font-weight: 800;
-        letter-spacing: 0.4px;
-        text-transform: uppercase;
-        color: #b91c1c;
-      }
+      .pmProofCell { display: inline-flex; align-items: center; justify-content: center; width: 60px; height: 60px; border-radius: 6px; overflow: hidden; cursor: pointer; background: #f1f5f9; border: 1px solid #e5e7eb; position: relative; vertical-align: middle; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+      .pmProofCell:hover { border-color: var(--mainColor, #2563eb); box-shadow: 0 2px 10px rgba(37, 99, 235, 0.20); }
+      .pmProofCell:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30); }
+      .pmProofThumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .pmProofBroken { display: none; align-items: center; justify-content: center; flex-direction: column; gap: 3px; width: 100%; height: 100%; color: #dc2626; font-size: 16px; background: #fef2f2; }
+      .pmProofBroken small { font-size: 8.5px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: #b91c1c; }
       .pmProofCell.is-broken { border-color: #fecaca; background: #fef2f2; }
       .pmProofCell.is-broken:hover { border-color: #dc2626; box-shadow: 0 2px 10px rgba(220, 38, 38, 0.18); }
-      .pmProofCell.is-broken .pmProofThumb  { display: none; }
+      .pmProofCell.is-broken .pmProofThumb { display: none; }
       .pmProofCell.is-broken .pmProofBroken { display: flex; }
-
-      /* ============================================================
-         Phone (SMS) link
-         ============================================================ */
-      .smsPhoneLink {
-        color: var(--mainColor, #2563eb);
-        text-decoration: none;
-        font-weight: 500;
-      }
+      .smsPhoneLink { color: var(--mainColor, #2563eb); text-decoration: none; font-weight: 500; }
       .smsPhoneLink:hover { text-decoration: underline; }
-
-      /* ============================================================
-         Remarks column — compact preview
-         ============================================================ */
-      .pmRemarksCell {
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-        max-width: 280px;
-        min-width: 200px;
-        text-align: left;
-        font-size: 12px;
-        line-height: 1.35;
-      }
-      .pmRemarkRow {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 2px 4px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: background 0.15s ease;
-        white-space: nowrap;
-        overflow: hidden;
-      }
+      .pmRemarksCell { display: flex; flex-direction: column; gap: 3px; max-width: 280px; min-width: 200px; text-align: left; font-size: 12px; line-height: 1.35; }
+      .pmRemarkRow { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; transition: background 0.15s ease; white-space: nowrap; overflow: hidden; }
       .pmRemarkRow:hover { background: #f1f5f9; }
-      .pmRemarkRow:focus-visible {
-        outline: none;
-        background: #eff6ff;
-        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
-      }
-      .pmRemarkLabel {
-        font-weight: 700;
-        color: #6b7280;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-        flex: 0 0 auto;
-        min-width: 52px;
-      }
-      .pmRemarkPreview {
-        color: #1c1e21;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex: 1 1 auto;
-      }
-      .pmRemarkPreview.is-empty {
-        color: #9ca3af;
-        font-style: italic;
-        font-weight: 500;
-      }
-
-      /* ============================================================
-         Remarks modal
-         ============================================================ */
-      .pmRemarksBackdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(15, 18, 28, 0.5);
-        -webkit-backdrop-filter: blur(2px);
-        backdrop-filter: blur(2px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-        z-index: 9999;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-      }
+      .pmRemarkRow:focus-visible { outline: none; background: #eff6ff; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25); }
+      .pmRemarkLabel { font-weight: 700; color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; flex: 0 0 auto; min-width: 52px; }
+      .pmRemarkPreview { color: #1c1e21; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+      .pmRemarkPreview.is-empty { color: #9ca3af; font-style: italic; font-weight: 500; }
+      .pmRemarksBackdrop { position: fixed; inset: 0; background: rgba(15, 18, 28, 0.5); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 9999; opacity: 0; transition: opacity 0.2s ease; }
       .pmRemarksBackdrop.pmVisible { opacity: 1; }
-
-      .pmRemarksCard {
-        width: 100%;
-        max-width: 540px;
-        max-height: calc(100vh - 40px);
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        box-shadow: 0 20px 50px rgba(15, 18, 28, 0.20);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        transform: translateY(10px) scale(0.98);
-        transition: transform 0.2s ease;
-        font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-      }
-      .pmRemarksBackdrop.pmVisible .pmRemarksCard {
-        transform: translateY(0) scale(1);
-      }
-
-      .pmRemarksHeader {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 16px 20px;
-        background: #f9fafb;
-        border-bottom: 1px solid #eef0f3;
-      }
-      .pmRemarksTitle {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        margin: 0;
-        font-size: 15px;
-        font-weight: 700;
-        color: #111827;
-        letter-spacing: 0.1px;
-      }
-      .pmRemarksClose {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: 8px;
-        background: transparent;
-        color: #606770;
-        font-size: 13px;
-        cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-      }
-      .pmRemarksClose:hover {
-        background: #fef2f2;
-        border-color: #fee2e2;
-        color: #dc2626;
-      }
-      .pmRemarksClose:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15);
-      }
-
-      .pmRemarksBody {
-        padding: 16px 20px 20px;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      .pmRemarkSection {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 6px 2px;
-        background: transparent;
-        border: none;
-        border-radius: 0;
-        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-      }
-      .pmRemarkSection.is-editing {
-        background: #ffffff;
-        border-color: var(--mainColor, #2563eb);
-        box-shadow: none;
-      }
-      .pmRemarkSectionHeader {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .pmRemarkSectionLabel {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11.5px;
-        font-weight: 700;
-        color: #374151;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .pmRemarkSectionValue {
-        font-size: 13.5px;
-        line-height: 1.55;
-        color: #1c1e21;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .pmRemarkSectionValue.is-empty {
-        color: #9ca3af;
-        font-style: italic;
-      }
-
-      .pmRemarkEditBtn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: 6px;
-        background: transparent;
-        color: #606770;
-        font-size: 12px;
-        cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-      }
-      .pmRemarkEditBtn:hover {
-        background: #eff6ff;
-        border-color: #dbeafe;
-        color: #2563eb;
-      }
-      .pmRemarkEditBtn:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15);
-      }
-
-      .pmRemarkTextarea {
-        width: 100%;
-        min-height: 90px;
-        resize: vertical;
-        padding: 10px 12px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        font-family: inherit;
-        font-size: 13.5px;
-        line-height: 1.5;
-        color: #1c1e21;
-        background: #ffffff;
-        outline: none;
-        box-sizing: border-box;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease;
-      }
-      .pmRemarkTextarea:focus {
-        border-color: var(--mainColor, #2563eb);
-        box-shadow: none;
-      }
-
-      .pmRemarkEditActions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-      }
-
-      .pmRemarkEditActions[hidden],
-      .pmRemarkTextarea[hidden],
-      .pmRemarkSectionValue[hidden] {
-        display: none !important;
-      }
-
-      .pmRemarkBtn {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 14px;
-        min-height: 34px;
-        font-family: inherit;
-        font-size: 13px;
-        font-weight: 600;
-        line-height: 1;
-        border-radius: 8px;
-        border: 1px solid transparent;
-        cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, filter 0.15s ease;
-      }
-      .pmRemarkBtn--ghost {
-        background: #ffffff;
-        border-color: #e5e7eb;
-        color: #4b5563;
-      }
+      .pmRemarksCard { width: 100%; max-width: 540px; max-height: calc(100vh - 40px); background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 20px 50px rgba(15, 18, 28, 0.20); display: flex; flex-direction: column; overflow: hidden; transform: translateY(10px) scale(0.98); transition: transform 0.2s ease; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+      .pmRemarksBackdrop.pmVisible .pmRemarksCard { transform: translateY(0) scale(1); }
+      .pmRemarksHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; background: #f9fafb; border-bottom: 1px solid #eef0f3; }
+      .pmRemarksTitle { display: inline-flex; align-items: center; gap: 10px; margin: 0; font-size: 15px; font-weight: 700; color: #111827; letter-spacing: 0.1px; }
+      .pmRemarksClose { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #606770; font-size: 13px; cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+      .pmRemarksClose:hover { background: #fef2f2; border-color: #fee2e2; color: #dc2626; }
+      .pmRemarksClose:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15); }
+      .pmRemarksBody { padding: 16px 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+      .pmRemarkSection { display: flex; flex-direction: column; gap: 8px; padding: 6px 2px; background: transparent; border: none; border-radius: 0; transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease; }
+      .pmRemarkSection.is-editing { background: #ffffff; border-color: var(--mainColor, #2563eb); box-shadow: none; }
+      .pmRemarkSectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .pmRemarkSectionLabel { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.5px; }
+      .pmRemarkSectionValue { font-size: 13.5px; line-height: 1.55; color: #1c1e21; white-space: pre-wrap; word-break: break-word; }
+      .pmRemarkSectionValue.is-empty { color: #9ca3af; font-style: italic; }
+      .pmRemarkEditBtn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #606770; font-size: 12px; cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+      .pmRemarkEditBtn:hover { background: #eff6ff; border-color: #dbeafe; color: #2563eb; }
+      .pmRemarkEditBtn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15); }
+      .pmRemarkTextarea { width: 100%; min-height: 90px; resize: vertical; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-family: inherit; font-size: 13.5px; line-height: 1.5; color: #1c1e21; background: #ffffff; outline: none; box-sizing: border-box; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+      .pmRemarkTextarea:focus { border-color: var(--mainColor, #2563eb); box-shadow: none; }
+      .pmRemarkEditActions { display: flex; justify-content: flex-end; gap: 8px; }
+      .pmRemarkEditActions[hidden], .pmRemarkTextarea[hidden], .pmRemarkSectionValue[hidden] { display: none !important; }
+      .pmRemarkBtn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; min-height: 34px; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1; border-radius: 8px; border: 1px solid transparent; cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, filter 0.15s ease; }
+      .pmRemarkBtn--ghost { background: #ffffff; border-color: #e5e7eb; color: #4b5563; }
       .pmRemarkBtn--ghost:hover { background: #f3f4f6; border-color: #d1d5db; color: #1c1e21; }
-      .pmRemarkBtn--primary {
-        background: var(--mainColor, #2563eb);
-        border-color: var(--mainColor, #2563eb);
-        color: #ffffff;
-      }
+      .pmRemarkBtn--primary { background: var(--mainColor, #2563eb); border-color: var(--mainColor, #2563eb); color: #ffffff; }
       .pmRemarkBtn--primary:hover { filter: brightness(0.94); }
-      .pmRemarkBtn:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30);
-      }
+      .pmRemarkBtn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.30); }
       .pmRemarkBtn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-      /* ============================================================
-         Proof (image preview) modal
-         ============================================================ */
-      .pmProofBackdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(15, 18, 28, 0.65);
-        -webkit-backdrop-filter: blur(3px);
-        backdrop-filter: blur(3px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-        z-index: 10000;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-      }
+      .pmProofBackdrop { position: fixed; inset: 0; background: rgba(15, 18, 28, 0.65); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10000; opacity: 0; transition: opacity 0.2s ease; }
       .pmProofBackdrop.pmVisible { opacity: 1; }
-
-      .pmProofCard {
-        width: 100%;
-        max-width: 720px;
-        max-height: calc(100vh - 40px);
-        background: #ffffff;
-        border-radius: 14px;
-        box-shadow: 0 20px 60px rgba(15, 18, 28, 0.40);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        transform: scale(0.96);
-        transition: transform 0.2s ease;
-        font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-      }
+      .pmProofCard { width: 100%; max-width: 720px; max-height: calc(100vh - 40px); background: #ffffff; border-radius: 14px; box-shadow: 0 20px 60px rgba(15, 18, 28, 0.40); display: flex; flex-direction: column; overflow: hidden; transform: scale(0.96); transition: transform 0.2s ease; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
       .pmProofBackdrop.pmVisible .pmProofCard { transform: scale(1); }
-
-      .pmProofHeader {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 14px 18px;
-        background: #f9fafb;
-        border-bottom: 1px solid #eef0f3;
-      }
-      .pmProofTitle {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        margin: 0;
-        font-size: 14.5px;
-        font-weight: 700;
-        color: #111827;
-      }
-      .pmProofTitle i {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 30px;
-        height: 30px;
-        border-radius: 8px;
-        background: rgba(99, 102, 241, 0.12);
-        color: var(--mainColor, #2563eb);
-        font-size: 13px;
-      }
-
-      .pmProofImageWrap {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 14px;
-        background: #0f172a;
-        min-height: 220px;
-      }
-      .pmProofImageWrap img {
-        max-width: 100%;
-        max-height: 62vh;
-        object-fit: contain;
-        display: block;
-        border-radius: 4px;
-      }
-      .pmProofSpinner {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        min-height: 180px;
-        color: #94a3b8;
-        font-size: 26px;
-      }
-      .pmProofBrokenBig {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 10px;
-        padding: 40px 20px;
-        text-align: center;
-        width: 100%;
-      }
-      .pmProofBrokenBig i {
-        font-size: 44px;
-        color: #f87171;
-      }
-      .pmProofBrokenBig strong {
-        color: #ffffff;
-        font-size: 15px;
-        font-weight: 700;
-      }
-      .pmProofBrokenBig span {
-        color: #94a3b8;
-        font-size: 12.5px;
-        max-width: 380px;
-        line-height: 1.5;
-      }
-
-      .pmProofUrlRow {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 12px 16px;
-        background: #f8fafc;
-        border-top: 1px solid #eef0f3;
-      }
-      .pmProofUrlLabel {
-        font-size: 10.5px;
-        font-weight: 800;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
-        color: #64748b;
-        flex: 0 0 auto;
-      }
-      .pmProofUrlLink {
-        flex: 1 1 auto;
-        min-width: 0;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 12px;
-        color: var(--mainColor, #2563eb);
-        text-decoration: none;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        padding: 6px 10px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-        transition: border-color 0.15s ease, background 0.15s ease;
-      }
-      .pmProofUrlLink:hover {
-        text-decoration: underline;
-        border-color: var(--mainColor, #2563eb);
-      }
-      .pmProofUrlLink:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
-      }
-      .pmProofCopyBtn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 34px;
-        height: 34px;
-        padding: 0;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-        color: #64748b;
-        cursor: pointer;
-        flex: 0 0 auto;
-        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-      }
-      .pmProofCopyBtn:hover {
-        background: #f1f5f9;
-        color: #1c1e21;
-        border-color: #cbd5e1;
-      }
-      .pmProofCopyBtn:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
-      }
-      .pmProofCopyBtn.is-copied {
-        color: #16a34a;
-        border-color: #bbf7d0;
-        background: #f0fdf4;
-      }
-
-      @media (max-width: 480px) {
-        .pmRemarksHeader  { padding: 14px 16px; }
-        .pmRemarksBody    { padding: 14px 16px 18px; }
-        .pmRemarksCard    { max-width: 100%; }
-        .pmProofCard      { max-width: 100%; }
-        .pmProofHeader    { padding: 12px 14px; }
-        .pmProofUrlRow    { padding: 10px 12px; flex-wrap: wrap; }
-        .pmProofImageWrap img { max-height: 50vh; }
-      }
+      .pmProofHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; background: #f9fafb; border-bottom: 1px solid #eef0f3; }
+      .pmProofTitle { display: inline-flex; align-items: center; gap: 10px; margin: 0; font-size: 14.5px; font-weight: 700; color: #111827; }
+      .pmProofTitle i { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: rgba(99, 102, 241, 0.12); color: var(--mainColor, #2563eb); font-size: 13px; }
+      .pmProofImageWrap { display: flex; align-items: center; justify-content: center; padding: 14px; background: #0f172a; min-height: 220px; }
+      .pmProofImageWrap img { max-width: 100%; max-height: 62vh; object-fit: contain; display: block; border-radius: 4px; }
+      .pmProofSpinner { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 180px; color: #94a3b8; font-size: 26px; }
+      .pmProofBrokenBig { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px 20px; text-align: center; width: 100%; }
+      .pmProofBrokenBig i { font-size: 44px; color: #f87171; }
+      .pmProofBrokenBig strong { color: #ffffff; font-size: 15px; font-weight: 700; }
+      .pmProofBrokenBig span { color: #94a3b8; font-size: 12.5px; max-width: 380px; line-height: 1.5; }
+      .pmProofUrlRow { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: #f8fafc; border-top: 1px solid #eef0f3; }
+      .pmProofUrlLabel { font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #64748b; flex: 0 0 auto; }
+      .pmProofUrlLink { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--mainColor, #2563eb); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 10px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; transition: border-color 0.15s ease, background 0.15s ease; }
+      .pmProofUrlLink:hover { text-decoration: underline; border-color: var(--mainColor, #2563eb); }
+      .pmProofUrlLink:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25); }
+      .pmProofCopyBtn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; color: #64748b; cursor: pointer; flex: 0 0 auto; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+      .pmProofCopyBtn:hover { background: #f1f5f9; color: #1c1e21; border-color: #cbd5e1; }
+      .pmProofCopyBtn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25); }
+      .pmProofCopyBtn.is-copied { color: #16a34a; border-color: #bbf7d0; background: #f0fdf4; }
+      @media (max-width: 480px) { .pmRemarksHeader { padding: 14px 16px; } .pmRemarksBody { padding: 14px 16px 18px; } .pmRemarksCard, .pmProofCard { max-width: 100%; } .pmProofHeader { padding: 12px 14px; } .pmProofUrlRow { padding: 10px 12px; flex-wrap: wrap; } .pmProofImageWrap img { max-height: 50vh; } }
     `;
     document.head.appendChild(style);
   }
 
-  // ------------------------------------------------------------------ status
   function classifyStatus(p) {
     const office = !!p.office_confirmed;
     const grounds = !!p.grounds_confirmed;
@@ -986,69 +327,41 @@
 
   function buildStatusBadge(p) {
     const key = classifyStatus(p);
-    if (key === "completed") {
-      return (
-        '<span class="pmStatusBadge pmStatus--completed">' +
-        '<i class="fas fa-circle-check"></i>Completed</span>'
-      );
-    }
-    if (key === "pending_grounds") {
-      return (
-        '<span class="pmStatusBadge pmStatus--pendingGrounds">' +
-        '<i class="fas fa-clock"></i>Pending \u2013 Grounds</span>'
-      );
-    }
-    return (
-      '<span class="pmStatusBadge pmStatus--pendingOffice">' +
-      '<i class="fas fa-clock"></i>Pending \u2013 Office</span>'
-    );
+    if (key === "completed")
+      return '<span class="pmStatusBadge pmStatus--completed"><i class="fas fa-circle-check"></i>Completed</span>';
+    if (key === "pending_grounds")
+      return '<span class="pmStatusBadge pmStatus--pendingGrounds"><i class="fas fa-clock"></i>Pending \u2013 Grounds</span>';
+    return '<span class="pmStatusBadge pmStatus--pendingOffice"><i class="fas fa-clock"></i>Pending \u2013 Office</span>';
   }
 
-  // ------------------------------------------------------------------ cells
   const remarkTypes = ["payer", "office", "grounds"];
   const remarkField = (type) => "remarks_" + type;
   const remarkLabelFor = (type) => type.charAt(0).toUpperCase() + type.slice(1);
 
   const readRemark = (payment, type) => {
     const v = payment && payment[remarkField(type)];
-    if (v === null || v === undefined) return "";
-    return String(v);
+    return v === null || v === undefined ? "" : String(v);
   };
 
   function buildProofCell(p) {
     if (!p.image_link) return '<span style="opacity:.55;">\u2014</span>';
     const url = escapeHtml(p.image_link);
     return (
-      '<div class="pmProofCell"' +
-      ' data-action="proof"' +
-      ' data-payment-id="' +
+      '<div class="pmProofCell" data-action="proof" data-payment-id="' +
       escapeHtml(p.payment_id) +
-      '"' +
-      ' role="button" tabindex="0"' +
-      ' title="View proof of payment">' +
-      '<img class="pmProofThumb" src="' +
+      '" role="button" tabindex="0" title="View proof of payment"><img class="pmProofThumb" src="' +
       url +
-      '" alt="Proof of payment" loading="lazy">' +
-      '<span class="pmProofBroken">' +
-      '<i class="fas fa-exclamation-triangle"></i>' +
-      "<small>Invalid</small>" +
-      "</span>" +
-      "</div>"
+      '" alt="Proof of payment" loading="lazy"><span class="pmProofBroken"><i class="fas fa-exclamation-triangle"></i><small>Invalid</small></span></div>'
     );
   }
 
   function buildPhoneCell(p) {
-    const phoneRaw = (p.payers_phone_number || "").trim();
-    if (!phoneRaw) return '<span style="opacity:.55;">\u2014</span>';
-    const phone = escapeHtml(phoneRaw);
+    const phone = escapeHtml((p.payers_phone_number || "").trim());
+    if (!phone) return '<span style="opacity:.55;">\u2014</span>';
     return (
-      '<a href="#"' +
-      ' class="smsPhoneLink"' +
-      ' data-action="sms"' +
-      ' data-payment-id="' +
+      '<a href="#" class="smsPhoneLink" data-action="sms" data-payment-id="' +
       escapeHtml(p.payment_id) +
-      '"' +
-      ' title="Send SMS notification">' +
+      '" title="Send SMS notification">' +
       phone +
       "</a>"
     );
@@ -1060,33 +373,24 @@
         const value = readRemark(p, type);
         const empty = value.trim() === "";
         const preview = empty ? "\u2014" : truncate(value, 60);
-        const cls = "pmRemarkRow is-" + type + (empty ? " is-empty" : "");
         return (
-          "" +
-          '<div class="' +
-          cls +
-          '"' +
-          ' data-action="remark"' +
-          ' data-type="' +
+          '<div class="pmRemarkRow is-' +
           type +
-          '"' +
-          ' role="button" tabindex="0"' +
-          ' title="View ' +
+          (empty ? " is-empty" : "") +
+          '" data-action="remark" data-type="' +
+          type +
+          '" role="button" tabindex="0" title="View ' +
           escapeHtml(remarkLabelFor(type)) +
-          ' remark">' +
-          '<span class="pmRemarkLabel">' +
+          ' remark"><span class="pmRemarkLabel">' +
           escapeHtml(remarkLabelFor(type)) +
-          "</span>" +
-          '<span class="pmRemarkPreview' +
+          '</span><span class="pmRemarkPreview' +
           (empty ? " is-empty" : "") +
           '">' +
           escapeHtml(preview) +
-          "</span>" +
-          "</div>"
+          "</span></div>"
         );
       })
       .join("");
-
     return (
       '<div class="pmRemarksCell" data-payment-id="' +
       escapeHtml(p.payment_id) +
@@ -1115,15 +419,6 @@
     return pill;
   }
 
-  /**
-   * Action cell per tab:
-   *
-   *   pending_grounds →  ✓ confirm grounds     (grounds staff's queue)
-   *   pending_office  →  (empty; column hidden via .hideActionCol)
-   *   verified        →  [Verified pill] ↩ undo grounds
-   *
-   * No delete button here — only admin can soft-delete.
-   */
   function buildActionsCell(p) {
     const wrap = document.createElement("div");
     wrap.className = "pmActionGroup";
@@ -1144,41 +439,28 @@
           "fas fa-undo",
           "pmActionBtn--unverify",
           (ev) => runUndo(p, ev.currentTarget, TABS[state.activeTab]),
-          "Undo grounds verification (returns to Pending \u2013 Grounds)",
+          "Undo grounds verification (returns to Pending – Grounds)",
         ),
       );
     } else if (state.activeTab === "verified") {
       wrap.appendChild(buildVerifiedPill("Payment fully verified"));
     }
-    // pending_office: intentionally empty (read-only tab).
 
     return wrap;
   }
 
-  // ------------------------------------------------------------------ notice
   function buildReadOnlyNoticeHtml() {
     if (state.activeTab === "pending_office") {
-      return (
-        "" +
-        '<tr class="readOnlyNoticeRow is-office">' +
-        '  <td colspan="11">' +
-        '    <div class="readOnlyNotice">' +
-        '      <i class="fas fa-lock"></i>' +
-        "      <span>These payments are still awaiting " +
-        "      <strong>Administrator / Office Staff</strong> confirmation.</span>" +
-        "    </div>" +
-        "  </td>" +
-        "</tr>"
-      );
+      return '<tr class="readOnlyNoticeRow is-office"><td colspan="11"><div class="readOnlyNotice"><i class="fas fa-lock"></i><span>These payments are still awaiting <strong>Administrator / Office Staff</strong> confirmation.</span></div></td></tr>';
     }
     return "";
   }
 
-  // ------------------------------------------------------------------ render
   function hideNoData() {
-    if (!el.noData) return;
-    el.noData.hidden = true;
-    el.noData.style.display = "none";
+    if (el.noData) {
+      el.noData.hidden = true;
+      el.noData.style.display = "none";
+    }
   }
 
   function showNoData(message) {
@@ -1193,9 +475,7 @@
   function renderLoading() {
     hideNoData();
     el.tbody.innerHTML =
-      '<tr><td colspan="12" style="text-align:center;padding:24px;opacity:.75;">' +
-      '<i class="fas fa-spinner fa-spin"></i> Loading payments\u2026' +
-      "</td></tr>";
+      '<tr><td colspan="12" style="text-align:center;padding:24px;opacity:.75;"><i class="fas fa-spinner fa-spin"></i> Loading payments\u2026</td></tr>';
   }
 
   function renderError(message) {
@@ -1205,11 +485,8 @@
 
   function renderRows(payments) {
     el.tbody.innerHTML = "";
-
     const noticeHtml = buildReadOnlyNoticeHtml();
-    if (noticeHtml) {
-      el.tbody.insertAdjacentHTML("beforeend", noticeHtml);
-    }
+    if (noticeHtml) el.tbody.insertAdjacentHTML("beforeend", noticeHtml);
 
     if (!Array.isArray(payments) || payments.length === 0) {
       showNoData("No records found");
@@ -1217,7 +494,6 @@
     }
 
     hideNoData();
-
     const frag = document.createDocumentFragment();
 
     payments.forEach((p) => {
@@ -1263,7 +539,6 @@
       const actionCell = document.createElement("td");
       actionCell.appendChild(buildActionsCell(p));
       tr.appendChild(actionCell);
-
       frag.appendChild(tr);
     });
 
@@ -1285,7 +560,6 @@
     if (el.currentPage) el.currentPage.textContent = String(current);
     if (el.totalPages) el.totalPages.textContent = String(total);
     if (el.totalRecords) el.totalRecords.textContent = String(records);
-
     if (el.prevBtn) el.prevBtn.disabled = current <= 1;
     if (el.nextBtn) el.nextBtn.disabled = current >= total;
 
@@ -1331,21 +605,17 @@
     }
   }
 
-  // ------------------------------------------------------------------ tab UI
   function updateTabUI() {
     el.tabButtons.forEach((btn) => {
       const isActive = btn.dataset.tab === state.activeTab;
       btn.classList.toggle("is-active", isActive);
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
     });
-
-    if (el.tableWrapper) {
+    if (el.tableWrapper)
       el.tableWrapper.classList.toggle(
         "hideActionCol",
         state.activeTab === "pending_office",
       );
-    }
-
     if (el.search) el.search.placeholder = SEARCH_PLACEHOLDER;
   }
 
@@ -1359,16 +629,14 @@
     loadTab();
   }
 
-  // ------------------------------------------------------------------ fetch
   function buildQuery() {
     const tabCfg = TABS[state.activeTab];
     const params = new URLSearchParams();
     params.set("page", String(state.page));
     params.set("limit", String(PER_PAGE));
     params.set("status", tabCfg.status);
-    if (state.search && state.search.length >= SEARCH_MIN_LEN) {
+    if (state.search && state.search.length >= SEARCH_MIN_LEN)
       params.set("search_term", state.search);
-    }
     return params.toString();
   }
 
@@ -1376,25 +644,19 @@
     const reqId = ++state.requestId;
     state.loading = true;
     renderLoading();
-
     try {
       const res = await fetchWithTimeout(API_URL + "?" + buildQuery(), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
       });
-
       if (reqId !== state.requestId) return;
-
       const json = await res.json().catch(() => null);
-
-      if (!res.ok || (json && json.success === false)) {
-        const msg =
+      if (!res.ok || (json && json.success === false))
+        throw new Error(
           (json && (json.message || json.error)) ||
-          "Request failed (" + res.status + ")";
-        throw new Error(msg);
-      }
-
+            "Request failed (" + res.status + ")",
+        );
       const payload = unwrap(json);
       renderRows(payload.payments || []);
       renderPagination(
@@ -1407,16 +669,16 @@
     } catch (err) {
       if (reqId !== state.requestId) return;
       console.error("[grounds-payments] load error:", err);
-      const msg = isAbortError(err)
-        ? "Loading payments timed out. Please try again."
-        : friendlyMessage(err, "Unable to load payment records.");
-      renderError(msg);
+      renderError(
+        isAbortError(err)
+          ? "Loading payments timed out. Please try again."
+          : friendlyMessage(err, "Unable to load payment records."),
+      );
     } finally {
       if (reqId === state.requestId) state.loading = false;
     }
   }
 
-  // ------------------------------------------------------------------ tab counts
   async function loadTabCounts() {
     await Promise.allSettled(
       Object.keys(TABS).map(async (tabId) => {
@@ -1434,29 +696,18 @@
           );
           const json = await res.json().catch(() => null);
           if (!json) return;
-          const data = unwrap(json);
-          const total =
-            Number(data.pagination && data.pagination.total_records) || 0;
+          const total = Number(unwrap(json).pagination?.total_records) || 0;
           const badge = document.querySelector(
             '[data-count-tab="' + tabId + '"]',
           );
           if (badge) badge.textContent = total > 0 ? String(total) : "";
-        } catch (_) {
-          /* silent */
-        }
+        } catch (_) {}
       }),
     );
   }
 
-  // ------------------------------------------------------------------ actions
   async function runConfirm(payment, btn, tabCfg) {
-    if (!btn || btn.disabled) return;
-    if (!tabCfg || !tabCfg.canConfirm) return;
-    if (!tabCfg.roleCheck || !tabCfg.roleCheck()) {
-      notify("You do not have permission to confirm this payment.", "error");
-      return;
-    }
-
+    if (!btn || btn.disabled || !tabCfg || !tabCfg.canConfirm) return;
     let ok = false;
     try {
       ok = await askConfirm(tabCfg.confirmPrompt.message, {
@@ -1471,7 +722,6 @@
 
     const restore = enterRowBusy(btn);
     let succeeded = false;
-
     try {
       const res = await fetchWithTimeout(
         API_URL + "?path_info=" + encodeURIComponent(payment.payment_id),
@@ -1485,39 +735,31 @@
           body: JSON.stringify({ action: tabCfg.confirmAction }),
         },
       );
-
       const json = await res.json().catch(() => null);
-      if (!res.ok || (json && json.success === false)) {
-        const msg =
+      if (!res.ok || (json && json.success === false))
+        throw new Error(
           (json && (json.message || json.error)) ||
-          "Request failed (" + res.status + ")";
-        throw new Error(msg);
-      }
-
+            "Request failed (" + res.status + ")",
+        );
       notify((json && json.message) || "Payment confirmed.", "success");
       succeeded = true;
-
       await loadTab();
       loadTabCounts();
     } catch (err) {
       console.error("[grounds-payments] confirm error:", err);
-      const msg = isAbortError(err)
-        ? "Request timed out. Please try again."
-        : friendlyMessage(err, "Confirm failed.");
-      notify(msg, "error");
+      notify(
+        isAbortError(err)
+          ? "Request timed out. Please try again."
+          : friendlyMessage(err, "Confirm failed."),
+        "error",
+      );
     } finally {
       if (!succeeded) restore();
     }
   }
 
   async function runUndo(payment, btn, tabCfg) {
-    if (!btn || btn.disabled) return;
-    if (!tabCfg || !tabCfg.canUndo) return;
-    if (!tabCfg.roleCheck || !tabCfg.roleCheck()) {
-      notify("You do not have permission to undo this verification.", "error");
-      return;
-    }
-
+    if (!btn || btn.disabled || !tabCfg || !tabCfg.canUndo) return;
     let ok = false;
     try {
       ok = await askConfirm(tabCfg.undoPrompt.message, {
@@ -1533,7 +775,6 @@
 
     const restore = enterRowBusy(btn);
     let succeeded = false;
-
     try {
       const res = await fetchWithTimeout(
         API_URL + "?path_info=" + encodeURIComponent(payment.payment_id),
@@ -1547,43 +788,39 @@
           body: JSON.stringify({ action: tabCfg.undoAction }),
         },
       );
-
       const json = await res.json().catch(() => null);
-      if (!res.ok || (json && json.success === false)) {
-        const msg =
+      if (!res.ok || (json && json.success === false))
+        throw new Error(
           (json && (json.message || json.error)) ||
-          "Request failed (" + res.status + ")";
-        throw new Error(msg);
-      }
-
+            "Request failed (" + res.status + ")",
+        );
       notify(
         (json && json.message) || "Grounds verification reverted.",
         "success",
       );
       succeeded = true;
-
       await loadTab();
       loadTabCounts();
     } catch (err) {
       console.error("[grounds-payments] undo error:", err);
-      const msg = isAbortError(err)
-        ? "Request timed out. Please try again."
-        : friendlyMessage(err, "Undo failed.");
-      notify(msg, "error");
+      notify(
+        isAbortError(err)
+          ? "Request timed out. Please try again."
+          : friendlyMessage(err, "Undo failed."),
+        "error",
+      );
     } finally {
       if (!succeeded) restore();
     }
   }
 
-  // ------------------------------------------------------------------ SMS
   function buildVerificationMessage(p) {
     const name = (p.payers_name || p.deceased_name || "valued client").trim();
-    const ref = (p.reference_number || "").trim();
     return (
       "Hello " +
       name +
       ", your payment with the reference number: " +
-      ref +
+      (p.reference_number || "").trim() +
       " is now verified."
     );
   }
@@ -1597,19 +834,15 @@
       notify("No phone number available for this record.", "error");
       return;
     }
-    const url =
-      "sms:" +
-      encodeURIComponent(phone) +
-      "&body=" +
-      encodeURIComponent(message || "");
     try {
-      window.location.href = url;
-    } catch (_) {
-      /* ignore */
-    }
+      window.location.href =
+        "sms:" +
+        encodeURIComponent(phone) +
+        "&body=" +
+        encodeURIComponent(message || "");
+    } catch (_) {}
   }
 
-  // ------------------------------------------------------------------ remarks modal
   function closeRemarksModal() {
     const modal = state.remarksModal;
     if (!modal) return;
@@ -1625,8 +858,7 @@
 
   function closeActiveEditor() {
     const section = state.editingSection;
-    if (!section) return;
-    if (typeof section.__endEdit === "function") section.__endEdit();
+    if (section && typeof section.__endEdit === "function") section.__endEdit();
   }
 
   async function saveRemark(payment, type, value) {
@@ -1647,19 +879,14 @@
           }),
         },
       );
-
       const json = await res.json().catch(() => null);
-      if (!res.ok || (json && json.success === false)) {
+      if (!res.ok || (json && json.success === false))
         throw new Error(
           (json && (json.message || json.error)) ||
             "Request failed (" + res.status + ")",
         );
-      }
-
-      const key = remarkField(type);
       const v = (value || "").trim();
-      payment[key] = v === "" ? null : v;
-
+      payment[remarkField(type)] = v === "" ? null : v;
       notify(
         (json && json.message) || remarkLabelFor(type) + " remark saved.",
         "success",
@@ -1667,10 +894,12 @@
       return true;
     } catch (err) {
       console.error("[grounds-payments] save remark error:", err);
-      const msg = isAbortError(err)
-        ? "Saving remark timed out. Please try again."
-        : friendlyMessage(err, "Failed to save remark.");
-      notify(msg, "error");
+      notify(
+        isAbortError(err)
+          ? "Saving remark timed out. Please try again."
+          : friendlyMessage(err, "Failed to save remark."),
+        "error",
+      );
       return false;
     }
   }
@@ -1687,18 +916,14 @@
   }
 
   function buildRemarkSection(payment, type) {
-    const isPayer = type === "payer";
-    const canEdit = !isPayer && canEditRemark(type);
+    const canEdit = type !== "payer" && canEditRemark(type);
     const value = readRemark(payment, type);
-    const empty = value.trim() === "";
-
     const section = document.createElement("section");
     section.className = "pmRemarkSection is-" + type;
     section.dataset.type = type;
 
     const header = document.createElement("div");
     header.className = "pmRemarkSectionHeader";
-
     const label = document.createElement("span");
     label.className = "pmRemarkSectionLabel";
     label.textContent = remarkLabelFor(type);
@@ -1712,14 +937,15 @@
       editBtn.title = "Edit " + remarkLabelFor(type) + " remark";
       editBtn.setAttribute("aria-label", editBtn.title);
       editBtn.innerHTML = '<i class="fas fa-pen"></i>';
-      editBtn.addEventListener("click", () => beginEdit());
+      editBtn.addEventListener("click", beginEdit);
       header.appendChild(editBtn);
     }
     section.appendChild(header);
 
     const view = document.createElement("div");
-    view.className = "pmRemarkSectionValue" + (empty ? " is-empty" : "");
-    view.textContent = empty ? "\u2014" : value;
+    view.className =
+      "pmRemarkSectionValue" + (value.trim() === "" ? " is-empty" : "");
+    view.textContent = value.trim() === "" ? "\u2014" : value;
     section.appendChild(view);
 
     if (!canEdit) return section;
@@ -1739,7 +965,7 @@
     cancelBtn.type = "button";
     cancelBtn.className = "pmRemarkBtn pmRemarkBtn--ghost";
     cancelBtn.textContent = "Cancel";
-    cancelBtn.addEventListener("click", () => endEdit());
+    cancelBtn.addEventListener("click", endEdit);
 
     const saveBtn = document.createElement("button");
     saveBtn.type = "button";
@@ -1753,20 +979,16 @@
     let original = value;
 
     function beginEdit() {
-      if (state.editingSection && state.editingSection !== section) {
+      if (state.editingSection && state.editingSection !== section)
         closeActiveEditor();
-      }
       original = readRemark(payment, type);
       textarea.value = original;
-
       view.hidden = true;
       textarea.hidden = false;
       actions.hidden = false;
       if (editBtn) editBtn.style.display = "none";
-
       state.editingSection = section;
       section.__endEdit = endEdit;
-
       textarea.focus();
       try {
         textarea.setSelectionRange(
@@ -1781,11 +1003,9 @@
       textarea.hidden = true;
       actions.hidden = true;
       if (editBtn) editBtn.style.display = "";
-
       textarea.value = original;
       view.textContent = original.trim() === "" ? "\u2014" : original;
       view.classList.toggle("is-empty", original.trim() === "");
-
       if (state.editingSection === section) {
         state.editingSection = null;
         delete section.__endEdit;
@@ -1794,38 +1014,29 @@
 
     saveBtn.addEventListener("click", async () => {
       const newValue = textarea.value;
-      if (newValue === original) {
-        endEdit();
-        return;
-      }
+      if (newValue === original) return endEdit();
       if (newValue.length > REMARK_MAX_LEN) {
         notify(
           "Remark is too long (max " + REMARK_MAX_LEN + " characters).",
           "error",
         );
-        textarea.focus();
-        return;
+        return textarea.focus();
       }
 
       saveBtn.disabled = true;
       cancelBtn.disabled = true;
       const prevLabel = saveBtn.textContent;
       saveBtn.textContent = "Saving\u2026";
-
       const ok = await saveRemark(payment, type, newValue);
-
       saveBtn.disabled = false;
       cancelBtn.disabled = false;
       saveBtn.textContent = prevLabel;
-
       if (!ok) return;
 
       const current = readRemark(payment, type);
-      const isNowEmpty = current.trim() === "";
-      view.textContent = isNowEmpty ? "\u2014" : current;
-      view.classList.toggle("is-empty", isNowEmpty);
+      view.textContent = current.trim() === "" ? "\u2014" : current;
+      view.classList.toggle("is-empty", current.trim() === "");
       original = current;
-
       refreshRowRemarks(payment);
       endEdit();
     });
@@ -1836,7 +1047,6 @@
   function openRemarksModal(payment, focusType) {
     if (!payment) return;
     closeRemarksModal();
-
     const backdrop = document.createElement("div");
     backdrop.className = "pmRemarksBackdrop";
     backdrop.setAttribute("role", "dialog");
@@ -1862,31 +1072,23 @@
 
     const body = document.createElement("div");
     body.className = "pmRemarksBody";
-
-    remarkTypes.forEach((type) => {
-      body.appendChild(buildRemarkSection(payment, type));
-    });
+    remarkTypes.forEach((type) =>
+      body.appendChild(buildRemarkSection(payment, type)),
+    );
     card.appendChild(body);
 
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) closeRemarksModal();
     });
-
     const onKey = (e) => {
       if (e.key === "Escape") {
-        if (state.editingSection) {
-          e.preventDefault();
-          closeActiveEditor();
-          return;
-        }
         e.preventDefault();
-        closeRemarksModal();
+        state.editingSection ? closeActiveEditor() : closeRemarksModal();
       }
     };
 
     document.body.appendChild(backdrop);
     requestAnimationFrame(() => backdrop.classList.add("pmVisible"));
-
     state.remarksModal = { backdrop, card, onKey };
     document.addEventListener("keydown", onKey, false);
 
@@ -1897,18 +1099,17 @@
         closeBtn.focus();
       }
     }, 60);
-
     if (focusType === "grounds" && canEditRemark("grounds")) {
       setTimeout(() => {
         const section = body.querySelector(".pmRemarkSection.is-grounds");
-        if (!section) return;
-        const btn = section.querySelector(".pmRemarkEditBtn");
-        if (btn) btn.click();
+        if (section) {
+          const btn = section.querySelector(".pmRemarkEditBtn");
+          if (btn) btn.click();
+        }
       }, 120);
     }
   }
 
-  // ------------------------------------------------------------------ proof modal
   function closeProofModal() {
     const modal = state.proofModal;
     if (!modal) return;
@@ -1924,7 +1125,6 @@
   function openProofModal(payment) {
     if (!payment) return;
     closeProofModal();
-
     const url = String(payment.image_link || "").trim();
     if (!url) {
       notify("No proof image attached to this payment.", "error");
@@ -1943,13 +1143,8 @@
 
     const header = document.createElement("div");
     header.className = "pmProofHeader";
-    const title = document.createElement("h3");
-    title.className = "pmProofTitle";
-    title.id = "pmProofTitle";
-    title.innerHTML =
-      '<i class="fas fa-image"></i><span>Proof of Payment</span>';
-    header.appendChild(title);
-
+    header.innerHTML =
+      '<h3 class="pmProofTitle" id="pmProofTitle"><i class="fas fa-image"></i><span>Proof of Payment</span></h3>';
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "pmRemarksClose";
@@ -1961,7 +1156,6 @@
 
     const imgWrap = document.createElement("div");
     imgWrap.className = "pmProofImageWrap";
-
     const spinner = document.createElement("div");
     spinner.className = "pmProofSpinner";
     spinner.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -1979,7 +1173,6 @@
       },
       { once: true },
     );
-
     img.addEventListener(
       "error",
       () => {
@@ -1988,9 +1181,7 @@
         const broken = document.createElement("div");
         broken.className = "pmProofBrokenBig";
         broken.innerHTML =
-          '<i class="fas fa-exclamation-triangle"></i>' +
-          "<strong>Image failed to load</strong>" +
-          "<span>The image at this URL could not be loaded. Check the URL below or open it in a new tab.</span>";
+          '<i class="fas fa-exclamation-triangle"></i><strong>Image failed to load</strong><span>The image at this URL could not be loaded. Check the URL below or open it in a new tab.</span>';
         imgWrap.appendChild(broken);
       },
       { once: true },
@@ -2002,18 +1193,14 @@
 
     const urlRow = document.createElement("div");
     urlRow.className = "pmProofUrlRow";
-
-    const urlLabel = document.createElement("span");
-    urlLabel.className = "pmProofUrlLabel";
-    urlLabel.textContent = "URL";
-
-    const urlLink = document.createElement("a");
-    urlLink.className = "pmProofUrlLink";
-    urlLink.href = url;
-    urlLink.target = "_blank";
-    urlLink.rel = "noopener noreferrer";
-    urlLink.textContent = url;
-    urlLink.title = url;
+    urlRow.innerHTML =
+      '<span class="pmProofUrlLabel">URL</span><a class="pmProofUrlLink" href="' +
+      url +
+      '" target="_blank" rel="noopener noreferrer" title="' +
+      url +
+      '">' +
+      url +
+      "</a>";
 
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
@@ -2035,18 +1222,14 @@
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(url);
-          flashCopied();
-          return;
+          return flashCopied();
         }
-      } catch (_) {
-        /* fall through */
-      }
+      } catch (_) {}
       try {
         const ta = document.createElement("textarea");
         ta.value = url;
         ta.setAttribute("readonly", "");
         ta.style.position = "fixed";
-        ta.style.top = "-1000px";
         ta.style.opacity = "0";
         document.body.appendChild(ta);
         ta.select();
@@ -2058,11 +1241,12 @@
       }
     });
 
-    urlRow.appendChild(urlLabel);
-    urlRow.appendChild(urlLink);
     urlRow.appendChild(copyBtn);
     card.appendChild(urlRow);
 
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) closeProofModal();
+    });
     const onKey = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -2070,13 +1254,8 @@
       }
     };
 
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop) closeProofModal();
-    });
-
     document.body.appendChild(backdrop);
     requestAnimationFrame(() => backdrop.classList.add("pmVisible"));
-
     state.proofModal = { backdrop, card, onKey };
     document.addEventListener("keydown", onKey, false);
 
@@ -2089,17 +1268,14 @@
     }, 60);
   }
 
-  // ------------------------------------------------------------------ events
   let eventsBound = false;
-
   function bindEvents() {
     if (eventsBound) return;
     eventsBound = true;
 
-    el.tabButtons.forEach((btn) => {
-      btn.addEventListener("click", () => switchTab(btn.dataset.tab));
-    });
-
+    el.tabButtons.forEach((btn) =>
+      btn.addEventListener("click", () => switchTab(btn.dataset.tab)),
+    );
     if (el.search) {
       el.search.addEventListener(
         "input",
@@ -2117,127 +1293,108 @@
         if (e.key !== "Enter") return;
         e.preventDefault();
         const v = el.search.value.trim();
-        if (v.length > 0 && v.length < SEARCH_MIN_LEN) {
-          notify(
+        if (v.length > 0 && v.length < SEARCH_MIN_LEN)
+          return notify(
             "Please enter at least " +
               SEARCH_MIN_LEN +
               " characters to search.",
             "warning",
           );
-          return;
-        }
         state.search = v;
         state.page = 1;
         loadTab();
       });
     }
 
-    if (el.prevBtn) {
+    if (el.prevBtn)
       el.prevBtn.addEventListener("click", () => {
-        if (state.page <= 1) return;
-        state.page -= 1;
-        loadTab();
+        if (state.page > 1) {
+          state.page -= 1;
+          loadTab();
+        }
       });
-    }
-
-    if (el.nextBtn) {
+    if (el.nextBtn)
       el.nextBtn.addEventListener("click", () => {
-        if (state.page >= state.totalPages) return;
-        state.page += 1;
-        loadTab();
+        if (state.page < state.totalPages) {
+          state.page += 1;
+          loadTab();
+        }
       });
-    }
 
     if (el.tbody) {
-      // Broken-image detection (capture phase — `error` doesn't bubble).
       el.tbody.addEventListener(
         "error",
         (e) => {
           const img = e.target;
-          if (!img || img.tagName !== "IMG") return;
-          if (!img.classList.contains("pmProofThumb")) return;
-          const cell = img.closest(".pmProofCell");
-          if (cell) cell.classList.add("is-broken");
+          if (
+            img &&
+            img.tagName === "IMG" &&
+            img.classList.contains("pmProofThumb")
+          ) {
+            const cell = img.closest(".pmProofCell");
+            if (cell) cell.classList.add("is-broken");
+          }
         },
         true,
       );
 
       el.tbody.addEventListener("click", (e) => {
-        // --- proof preview ---
         const proofCell = e.target.closest('[data-action="proof"]');
         if (proofCell && el.tbody.contains(proofCell)) {
           e.preventDefault();
           const row = proofCell.closest("tr");
-          if (!row || row.classList.contains("pmRowBusy")) return;
-          const payment = row.__payment;
-          if (!payment) return;
-          openProofModal(payment);
+          if (row && !row.classList.contains("pmRowBusy") && row.__payment)
+            openProofModal(row.__payment);
           return;
         }
-
-        // --- SMS ---
         const smsLink = e.target.closest('[data-action="sms"]');
         if (smsLink && el.tbody.contains(smsLink)) {
           e.preventDefault();
           const row = smsLink.closest("tr");
-          if (!row || row.classList.contains("pmRowBusy")) return;
-          const payment = row.__payment;
-          if (!payment) return;
-          const phone = (payment.payers_phone_number || "").trim();
-          if (!phone) {
-            notify("This record has no phone number.", "error");
-            return;
+          if (row && !row.classList.contains("pmRowBusy") && row.__payment) {
+            const phone = (row.__payment.payers_phone_number || "").trim();
+            phone
+              ? openSms(phone, buildVerificationMessage(row.__payment))
+              : notify("This record has no phone number.", "error");
           }
-          openSms(phone, buildVerificationMessage(payment));
           return;
         }
-
-        // --- remarks ---
         const remarkRow = e.target.closest('[data-action="remark"]');
         if (remarkRow && el.tbody.contains(remarkRow)) {
           e.preventDefault();
           const row = remarkRow.closest("tr");
-          if (!row || row.classList.contains("pmRowBusy")) return;
-          const payment = row.__payment;
-          if (!payment) return;
-          openRemarksModal(payment, remarkRow.dataset.type || "");
+          if (row && !row.classList.contains("pmRowBusy") && row.__payment)
+            openRemarksModal(row.__payment, remarkRow.dataset.type || "");
         }
       });
 
       el.tbody.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
-
         const proofCell = e.target.closest('[data-action="proof"]');
         if (proofCell && el.tbody.contains(proofCell)) {
           e.preventDefault();
           const row = proofCell.closest("tr");
-          if (!row || row.classList.contains("pmRowBusy")) return;
-          const payment = row.__payment;
-          if (!payment) return;
-          openProofModal(payment);
+          if (row && !row.classList.contains("pmRowBusy") && row.__payment)
+            openProofModal(row.__payment);
           return;
         }
-
         const remarkRow = e.target.closest('[data-action="remark"]');
-        if (!remarkRow || !el.tbody.contains(remarkRow)) return;
-        e.preventDefault();
-        const row = remarkRow.closest("tr");
-        if (!row || row.classList.contains("pmRowBusy")) return;
-        const payment = row.__payment;
-        if (!payment) return;
-        openRemarksModal(payment, remarkRow.dataset.type || "");
+        if (remarkRow && el.tbody.contains(remarkRow)) {
+          e.preventDefault();
+          const row = remarkRow.closest("tr");
+          if (row && !row.classList.contains("pmRowBusy") && row.__payment)
+            openRemarksModal(row.__payment, remarkRow.dataset.type || "");
+        }
       });
     }
   }
 
-  // ------------------------------------------------------------------ init
   function start() {
     injectStyles();
     bindEvents();
     updateTabUI();
     loadTab();
     loadTabCounts();
-
     setTimeout(() => {
       updateTabUI();
       loadTab();
