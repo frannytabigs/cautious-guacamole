@@ -7,6 +7,14 @@
   const SELECT_SETTINGS = {
     payment_channels_list: "Select payment method",
     payment_purposes_list: "Select payment purpose",
+    barangay_options: "Select barangay",
+  };
+
+  // Dropdowns rendered as editable .list containers: setting_key -> input class
+  const DROPDOWN_INPUT_CLASSES = {
+    payment_channels_list: "channelInput",
+    payment_purposes_list: "purposeInput",
+    barangay_options: "barangayInput",
   };
 
   /* ------------------------------------------------------------------
@@ -101,9 +109,7 @@
               // Our editable list container (e.g. <div class="list" id="...">)
               if (el.classList.contains("list")) {
                 const inputClass =
-                  key === "payment_channels_list"
-                    ? "channelInput"
-                    : "purposeInput";
+                  DROPDOWN_INPUT_CLASSES[key] ?? "purposeInput";
 
                 // Normalise to an array of strings (rebuildDropdownList expects strings)
                 const items = Array.isArray(options)
