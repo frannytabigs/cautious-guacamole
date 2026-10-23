@@ -840,7 +840,7 @@ if ($method === 'PUT') {
             }
         }
 
-        // ---- 1) Apply rename + rewrite active grave codes ----------------
+        // ---- 1) Apply rename + rebuild active grave codes ----------------
         if ($renameFrom !== null) {
             $upd = $pdo->prepare("
                 UPDATE blocks SET block_name = ?, updated_by = ?
@@ -848,23 +848,41 @@ if ($method === 'PUT') {
             ");
             $upd->execute([$renameTo, $userData['user_id'], $blockId]);
 
-            // mb_strlen, not strlen: block names may contain non-ASCII
-            // characters, and byte length would produce a wrong SUBSTRING
-            // offset, corrupting grave codes.
+            // Rebuild grave_code from row_num/col_num instead of doing
+            // SUBSTRING surgery on the old code.
+            //
+            // Why rebuild?
+            //   * SUBSTRING in MySQL is 1-indexed, and cutting the prefix
+            //     mid-string can leave a stray '-' behind (a classic cause
+            //     of "extra dash each rename" bugs).
+            //   * It is idempotent: running it on an already-correct code
+            //     produces the same result.
+            //   * It heals existing data that was corrupted by the old
+            //     substring logic — the next rename on that block fixes it.
+            //   * It does not depend on LIKE wildcards, so block names that
+            //     contain % or _ are safe.
+            //
+            // Padding note: we use IF(row_num < 10, '0', '') rather than
+            // LPAD(row_num, 2, '0'). LPAD *truncates* when the input is
+            // longer than the target length — LPAD(500, 2, '0') would
+            // return '50'. The IF form matches PHP's str_pad(…, 2, '0',
+            // STR_PAD_LEFT), which never truncates.
             $graveUpd = $pdo->prepare("
                 UPDATE graves
-                SET grave_code = CONCAT(?, SUBSTRING(grave_code, ?)),
+                SET grave_code = CONCAT(
+                        ?,
+                        '-',
+                        IF(row_num < 10, '0', ''), row_num,
+                        '-',
+                        IF(col_num < 10, '0', ''), col_num
+                    ),
                     updated_by = ?
-                WHERE block_id = ?
-                  AND deleted_at IS NULL
-                  AND grave_code LIKE ?
+                WHERE block_id = ? AND deleted_at IS NULL
             ");
             $graveUpd->execute([
-                $renameTo . '-',
-                mb_strlen($renameFrom, 'UTF-8') + 1,
+                $renameTo,
                 $userData['user_id'],
                 $blockId,
-                $renameFrom . '-%',
             ]);
         }
 
