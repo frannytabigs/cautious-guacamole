@@ -304,6 +304,7 @@ document.addEventListener("DOMContentLoaded", function () {
       Expiring: COLORS.warning,
       Expired: COLORS.danger,
       Reserved: COLORS.reserved,
+      Other: COLORS.neutral,
     };
 
     const segments = labels.map((label, i) => ({
@@ -529,7 +530,14 @@ document.addEventListener("DOMContentLoaded", function () {
   // Transforms
   // ============================================================
   function transformGraveDistribution(dist) {
-    const order = ["Vacant", "Occupied", "Expiring", "Expired", "Reserved"];
+    const order = [
+      "Vacant",
+      "Occupied",
+      "Expiring",
+      "Expired",
+      "Reserved",
+      "Other",
+    ];
     const labels = [];
     const values = [];
 
@@ -579,8 +587,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderEmptyCharts() {
     renderPie(
-      ["Vacant", "Occupied", "Expiring", "Expired", "Reserved"],
-      [0, 0, 0, 0, 0],
+      ["Vacant", "Occupied", "Expiring", "Expired", "Reserved", "Other"],
+      [0, 0, 0, 0, 0, 0],
       0,
     );
 

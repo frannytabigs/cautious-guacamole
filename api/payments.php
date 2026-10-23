@@ -403,7 +403,7 @@ try {
                     );
                 }
                 if ($e->getCode() == 23000) {
-                    Response::error('Conflict: Reference number already exists.', 409);
+                    Response::error('Conflict: Reference number already exists and is submitted. Please contact the office to verify your reference number', 409);
                 }
                 systemLog("Payment creation error: " . $e->getMessage(), 'System');
                 Response::error('Database error while creating payment.', 500);

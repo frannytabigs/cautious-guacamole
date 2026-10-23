@@ -9,6 +9,24 @@
     payment_purposes_list: "Select payment purpose",
   };
 
+  /* ------------------------------------------------------------------
+   * Address settings: the value is a plain address string.
+   * If a matching element is a link (<a>), its href is pointed at
+   * Google Maps:  https://maps.google.com/?q=<address with + for spaces>
+   * e.g. "Department of General Services Mandaue"
+   *      -> https://maps.google.com/?q=Department+of+General+Services+Mandaue
+   * ------------------------------------------------------------------ */
+  const MAPS_ADDRESS_KEYS = new Set(["cemetery_address", "office_address"]);
+  const MAPS_BASE_URL = "https://maps.google.com/";
+
+  /* ------------------------------------------------------------------
+   * Contact settings: the value is a plain email / phone string.
+   * If a matching element is a link (<a>), its href becomes:
+   *   contact_email -> mailto:<email>
+   *   contact_phone -> tel:<phone>  (whitespace / parentheses stripped)
+   * ------------------------------------------------------------------ */
+  const CONTACT_LINK_KEYS = new Set(["contact_email", "contact_phone"]);
+
   function loadSiteContent(showerror = false) {
     fetch(API_URL, { cache: "no-store" })
       .then((response) => {
@@ -151,6 +169,90 @@
             continue;
           }
 
+          // ---------- Addresses -> Google Maps links ----------
+          // cemetery_address / office_address:
+          //   <a id="cemetery_address">     -> text + href = maps link
+          //   <input id="office_address">   -> plain address (as before)
+          //   anything else                 -> text content (as before)
+          if (MAPS_ADDRESS_KEYS.has(key)) {
+            const address =
+              value === null || value === undefined ? "" : String(value).trim();
+
+            targets.forEach((el) => {
+              // Editable fields keep the plain address text
+              if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) {
+                if (el.type === "checkbox") {
+                  el.checked = /^(1|true|yes|on)$/i.test(address);
+                } else if (el.type === "file" || el.type === "radio") {
+                  return; // cannot be set programmatically — skip
+                } else {
+                  el.value = address;
+                }
+                return;
+              }
+
+              // Links: point them at Google Maps
+              if (el.tagName === "A") {
+                el.textContent = address;
+
+                if (address) {
+                  el.setAttribute("href", buildMapsHref(address));
+                } else {
+                  el.removeAttribute("href"); // don't leave a stale link
+                }
+                return;
+              }
+
+              // Fallback: plain text (same behaviour as other settings)
+              el.textContent = address;
+            });
+
+            continue;
+          }
+
+          // ---------- Contact links (mailto: / tel:) ----------
+          // contact_email / contact_phone:
+          //   <a id="contact_email">     -> text + href = mailto:<email>
+          //   <a id="contact_phone">     -> text + href = tel:<phone>
+          //   <input id="contact_email"> -> plain value (as before)
+          //   anything else              -> text content (as before)
+          if (CONTACT_LINK_KEYS.has(key)) {
+            const contact =
+              value === null || value === undefined ? "" : String(value).trim();
+
+            targets.forEach((el) => {
+              // Editable fields keep the plain value
+              if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) {
+                if (el.type === "checkbox") {
+                  el.checked = /^(1|true|yes|on)$/i.test(contact);
+                } else if (el.type === "file" || el.type === "radio") {
+                  return; // cannot be set programmatically — skip
+                } else {
+                  el.value = contact;
+                }
+                return;
+              }
+
+              // Links: point them at mailto: / tel:
+              if (el.tagName === "A") {
+                el.textContent = contact;
+
+                const href = buildContactHref(key, contact);
+                if (href) {
+                  el.setAttribute("href", href);
+                } else {
+                  el.removeAttribute("href"); // don't leave a stale link
+                }
+                return;
+              }
+
+              // Fallback: plain text (same behaviour as other settings)
+              el.textContent = contact;
+            });
+
+            continue;
+          }
+
           // ---------- All other settings (text / value) ----------
           targets.forEach((el) => {
             if (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) {
@@ -173,6 +275,41 @@
           showAlertTOP("Failed to load settings", "error");
         }
       });
+  }
+
+  /**
+   * Build a Google Maps search URL for an address string.
+   * "Department of General Services Mandaue"
+   *   -> "https://maps.google.com/?q=Department+of+General+Services+Mandaue"
+   * Returns "" when the address is empty.
+   */
+  function buildMapsHref(address) {
+    const text = String(address ?? "").trim();
+    if (!text) return "";
+    // URLSearchParams encodes spaces as "+" and escapes the rest safely
+    return `${MAPS_BASE_URL}?${new URLSearchParams({ q: text }).toString()}`;
+  }
+
+  /**
+   * Build a mailto: / tel: URI for a contact value.
+   *   buildContactHref("contact_email", "info@example.com")
+   *     -> "mailto:info@example.com"
+   *   buildContactHref("contact_phone", "+63 (917) 123-4567")
+   *     -> "tel:+63917123-4567"
+   * Returns "" when the value is empty.
+   */
+  function buildContactHref(key, value) {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+
+    if (key === "contact_email") {
+      return `mailto:${text}`;
+    }
+
+    // tel: strip whitespace and parentheses so the URI is clean,
+    // but keep digits, "+" and visual separators like "-" / "."
+    const phone = text.replace(/[\s()]/g, "");
+    return phone ? `tel:${phone}` : "";
   }
 
   // Helper: fill a <select> with options from JSON data

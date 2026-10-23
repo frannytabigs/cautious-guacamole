@@ -85,14 +85,8 @@
               >
                 Save Layout
               </button>
-              <button
-                class="cancelBtn"
-                id="btnCancelAdd"
-                style="display: none"
-                type="button"
-              >
-                Cancel resize
-              </button>
+
+              <!-- Reshape Toolbar -->
               <button
                 class="reshapeSubBtn done"
                 id="btnKeepSide"
@@ -141,30 +135,6 @@
             <div class="mapHint" id="mapHint"></div>
             <div class="mapLoading" id="mapLoading">Loading map&hellip;</div>
           </div>
-
-          <div class="mapLegend">
-            <div class="legendItem">
-              <div
-                class="legendDot"
-                style="background: #fff; border-color: #cbd5e1"
-              ></div>
-              Available
-            </div>
-            <div class="legendItem">
-              <div
-                class="legendDot"
-                style="background: #dcfce7; border-color: #4ade80"
-              ></div>
-              Occupied
-            </div>
-            <div class="legendItem">
-              <div
-                class="legendDot"
-                style="background: #dbeafe; border-color: #60a5fa"
-              ></div>
-              Reserved
-            </div>
-          </div>
         </div>
       </div>
 
@@ -183,8 +153,5 @@
     <script src="assets/js/alert.js"></script>
     <script src="assets/js/map.js"></script>
     <script src="assets/js/sidebar.js"></script>
-    <script>
-      initAuth(["Office Staff", "Administrator"]);
-    </script>
   </body>
 </html>
