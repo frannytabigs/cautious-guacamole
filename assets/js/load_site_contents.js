@@ -36,7 +36,7 @@
       .then((result) => {
         const rows = Array.isArray(result) ? result : result?.data;
         if (!Array.isArray(rows)) {
-          console.error("Invalid settings response:", result);
+          // console.error("Invalid settings response:", result);
           if (typeof showAlertTOP === "function" && showerror) {
             showAlertTOP("Failed to load settings: invalid response", "error");
           }
@@ -62,7 +62,7 @@
 
           // Safe key check for CSS selector
           if (!/^[A-Za-z0-9_-]+$/.test(key)) {
-            console.warn(`Skipping unsafe setting key: "${key}"`);
+            // console.warn(`Skipping unsafe setting key: "${key}"`);
             continue;
           }
 
@@ -75,7 +75,7 @@
           });
 
           if (targets.length === 0) {
-            console.warn(`No element found with id starting with "${key}"`);
+            // console.warn(`No element found with id starting with "${key}"`);
             continue;
           }
 
@@ -85,7 +85,7 @@
             try {
               options = JSON.parse(value);
             } catch {
-              console.warn(`Invalid JSON for ${key}:`, value);
+              // console.warn(`Invalid JSON for ${key}:`, value);
               continue;
             }
 
@@ -121,15 +121,15 @@
                 if (typeof window.rebuildDropdownList === "function") {
                   window.rebuildDropdownList(key, items, inputClass);
                 } else {
-                  console.warn("rebuildDropdownList not defined yet");
+                  // console.warn("rebuildDropdownList not defined yet");
                 }
                 return;
               }
 
-              console.warn(
-                `Element for "${key}" is not a <select> or .list`,
-                el,
-              );
+              // console.warn(
+              //   `Element for "${key}" is not a <select> or .list`,
+              //   el,
+              // );
             });
 
             continue;
@@ -151,7 +151,7 @@
               const iframe =
                 el.tagName === "IFRAME" ? el : el.querySelector("iframe");
               if (!iframe) {
-                console.warn(`No iframe found for #${el.id}`);
+                // console.warn(`No iframe found for #${el.id}`);
                 return;
               }
 
@@ -160,10 +160,10 @@
                 if (url.protocol === "http:" || url.protocol === "https:") {
                   iframe.src = url.href;
                 } else {
-                  console.warn("Invalid map URL protocol:", value);
+                  // console.warn("Invalid map URL protocol:", value);
                 }
               } catch {
-                console.warn("Invalid map URL:", value);
+                // console.warn("Invalid map URL:", value);
               }
             });
             continue;
@@ -270,7 +270,7 @@
         }
       })
       .catch((error) => {
-        console.error("Error loading settings:", error);
+        // console.error("Error loading settings:", error);
         if (typeof showAlertTOP === "function" && showerror) {
           showAlertTOP("Failed to load settings", "error");
         }
@@ -393,7 +393,7 @@
         const user = result?.data ?? result;
 
         if (!user || typeof user !== "object" || Array.isArray(user)) {
-          console.error("Invalid user response:", result);
+          // console.error("Invalid user response:", result);
           if (typeof showAlertTOP === "function" && showerror) {
             showAlertTOP("Failed to load user info: invalid response", "error");
           }
@@ -426,7 +426,7 @@
         }
       })
       .catch((error) => {
-        console.error("Error loading user:", error);
+        // console.error("Error loading user:", error);
         if (typeof showAlertTOP === "function" && showerror) {
           showAlertTOP("Failed to load user info", "error");
         }
@@ -451,7 +451,7 @@
   /** All elements whose id starts with `prefix`, skipping claimed ones. */
   function collectTargets(prefix, claimed) {
     if (!/^[A-Za-z0-9_-]+$/.test(prefix)) {
-      console.warn(`Skipping unsafe id prefix: "${prefix}"`);
+      // console.warn(`Skipping unsafe id prefix: "${prefix}"`);
       return [];
     }
     const found = [];
