@@ -11,6 +11,7 @@ body {
   gap: 24px;
   padding: 24px;
   color: #333333;
+  overflow-x: hidden;
 
   label.required::after {
     content: " *";

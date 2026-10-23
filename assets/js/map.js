@@ -3,31 +3,34 @@
    ========================================================================== 
    This file handles the 2D canvas rendering, editing, reshaping, 
    and grave management for the admin map.
+
+   Integrations:
+     - confirm_ui(...)     → promise-based confirm dialog (confirm_ui.js)
+     - showAlertTOP(...)   → toast notifications (top-right)
    ========================================================================== */
 
 const MAP = (() => {
   // ── CONSTANTS ────────────────────────────────────────────────────────────
-  const CELL = 22; // The grid size for snapping
-  const API_BLOCKS = "api/blocks.php"; // Endpoint for fetching/saving blocks
+  const CELL = 22;
+  const API_BLOCKS = "api/blocks.php";
 
   // ── STATE VARIABLES ──────────────────────────────────────────────────────
-  let mapEditMode = false; // Are we currently in "Edit Layout" mode?
-  let hasUnsavedChanges = false; // Tracks if changes were made while editing
-  let reshapeMode = false; // Are we currently in "Reshape Block" mode?
-  let reshapeBid = null; // The ID of the block being reshaped
-  let reshapeHistory = []; // Undo stack for reshaping
-  let drawPoints = []; // The line being drawn in reshape mode
-  let pendingSplit = null; // The preview of the split shape
-  let mousePos = { x: 0, y: 0 }; // Current mouse position on canvas
+  let mapEditMode = false;
+  let hasUnsavedChanges = false;
+  let reshapeMode = false;
+  let reshapeBid = null;
+  let reshapeHistory = [];
+  let drawPoints = [];
+  let pendingSplit = null;
+  let mousePos = { x: 0, y: 0 };
   let cvW = 0,
-    cvH = 0; // Canvas width and height
-  let curBlock = null; // Currently selected block
-  let hoveredBlock = null; // Block currently under the mouse
-  let pendingNavHref = null; // URL to navigate to if user saves/discards
-  let blocks = {}; // Dictionary of all loaded blocks
-  let blockOrder = []; // Array to maintain z-index / order of blocks
+    cvH = 0;
+  let curBlock = null;
+  let hoveredBlock = null;
+  let pendingNavHref = null;
+  let blocks = {};
+  let blockOrder = [];
 
-  // Drag / Resize state objects
   let blockDrag = {
     active: false,
     bid: null,
@@ -49,16 +52,57 @@ const MAP = (() => {
     origPts: null,
     isCustom: false,
   };
-  let drag = { active: false, sx: 0, sy: 0, ex: 0, ey: 0 };
 
   const $ = (id) => document.getElementById(id);
   let canvasWrap, cv, ctx;
+
+  // ── UI HELPERS ───────────────────────────────────────────────────────────
+  function setHint(t) {
+    if ($("mapHint")) $("mapHint").textContent = t;
+  }
+
+  function setSaveBtnDirty() {
+    const btn = $("btnSaveMap");
+    if (!btn) return;
+    btn.textContent = "Save Changes";
+    btn.style.background = "#22c55e";
+    btn.style.color = "#ffffff";
+    btn.style.border = "none";
+  }
+
+  function setModalBusy(busy) {
+    const cb = $("modalConfirm"),
+      cc = $("modalCancel"),
+      body = $("modalBody");
+    if (busy) {
+      if (cb) {
+        cb.dataset._orig = cb.innerHTML;
+        cb.disabled = true;
+        cb.innerHTML =
+          '<i class="fas fa-spinner fa-spin" style="margin-right:6px"></i>Please wait…';
+      }
+      if (cc) cc.disabled = true;
+    } else {
+      if (cb) {
+        cb.disabled = false;
+        if (cb.dataset._orig) {
+          cb.innerHTML = cb.dataset._orig;
+          delete cb.dataset._orig;
+        }
+      }
+      if (cc) cc.disabled = false;
+    }
+    if (body) {
+      body.querySelectorAll("input,select,textarea,button").forEach((el) => {
+        el.disabled = busy;
+      });
+    }
+  }
 
   // ── GEOMETRY HELPERS ─────────────────────────────────────────────────────
   function uid() {
     return Math.random().toString(36).slice(2, 8);
   }
-
   function snap(v) {
     return Math.round(v / CELL) * CELL;
   }
@@ -110,8 +154,8 @@ const MAP = (() => {
 
   function distToSegment(p, a, b) {
     const dx = b.x - a.x,
-      dy = b.y - a.y;
-    const lenSq = dx * dx + dy * dy;
+      dy = b.y - a.y,
+      lenSq = dx * dx + dy * dy;
     if (lenSq === 0) return dist(p, a);
     let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
     t = Math.max(0, Math.min(1, t));
@@ -120,8 +164,8 @@ const MAP = (() => {
 
   function projectOntoSegment(p, a, b) {
     const dx = b.x - a.x,
-      dy = b.y - a.y;
-    const lenSq = dx * dx + dy * dy;
+      dy = b.y - a.y,
+      lenSq = dx * dx + dy * dy;
     if (lenSq === 0) return { point: { ...a }, t: 0 };
     const t = Math.max(
       0,
@@ -234,8 +278,8 @@ const MAP = (() => {
     const total = b.total_graves || b.rows * b.cols;
     const occ = b.occupied_count || 0;
     const vac = b.vacant_count || 0;
-    const res = Math.max(0, total - occ - vac);
-    return { total, occ, res, avail: vac };
+    const other = Math.max(0, total - occ - vac);
+    return { total, occ, res: other, avail: vac };
   }
 
   function escHtml(str) {
@@ -264,6 +308,28 @@ const MAP = (() => {
     });
   }
 
+  // ── CLAMPING HELPERS ─────────────────────────────────────────────────────
+  // Clamp a translation so the block's bounds stay within the canvas, or
+  // at least partially visible when the block is larger than the canvas.
+  function clampTranslate(b, dx, dy) {
+    const minX = Math.min(0, cvW - b.w);
+    const maxX = Math.max(0, cvW - b.w);
+    const minY = Math.min(0, cvH - b.h);
+    const maxY = Math.max(0, cvH - b.h);
+    const newX = Math.max(minX, Math.min(maxX, b.x + dx));
+    const newY = Math.max(minY, Math.min(maxY, b.y + dy));
+    return { dx: newX - b.x, dy: newY - b.y };
+  }
+
+  // Clamp a resize so the block can't extend past the canvas edges.
+  function clampResize(origX, origY, origW, origH, dx, dy) {
+    const maxNewW = Math.max(CELL * 2, cvW - origX);
+    const maxNewH = Math.max(CELL * 2, cvH - origY);
+    const newW = Math.max(CELL * 2, Math.min(maxNewW, origW + dx));
+    const newH = Math.max(CELL * 2, Math.min(maxNewH, origH + dy));
+    return { newW, newH };
+  }
+
   // ── CANVAS MANAGEMENT ────────────────────────────────────────────────────
   function syncCanvasSize() {
     const w = canvasWrap.clientWidth,
@@ -273,7 +339,6 @@ const MAP = (() => {
     cvH = h;
     const bw = Math.round(w * dpr),
       bh = Math.round(h * dpr);
-
     if (cv.width !== bw || cv.height !== bh) {
       cv.width = bw;
       cv.height = bh;
@@ -302,63 +367,66 @@ const MAP = (() => {
       block_type: b.block_type,
       image_link: b.image_link,
       coordinates: JSON.stringify(b.coordinates),
-      shape: b.shape,
       custom: b.custom ? 1 : 0,
       remarks: b.remarks || null,
     };
-
     const isNew = !b.block_id;
     const url = isNew ? API_BLOCKS : `${API_BLOCKS}/${b.block_id}`;
     const method = isNew ? "POST" : "PUT";
-
     if (isNew) {
       payload.rows = b.rows;
       payload.cols = b.cols;
     }
-
     return fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    }).then((r) => r.json());
+    })
+      .then((r) => r.json())
+      .then((r) => {
+        if (r && r.success && r.data && r.data.block_id && !b.block_id) {
+          b.block_id = r.data.block_id;
+        }
+        return r;
+      });
   }
 
-  function persistSave() {
-    Promise.all(blockOrder.map(saveOneBlock))
-      .then((results) => {
-        const failed = results.find((r) => r && r.success === false);
-        if (failed) {
-          console.error("Save errors:", results);
-          setHint("Save failed: " + (failed.message || "unknown error"));
-          return;
-        }
-        flashSaved();
-        persistLoad();
-      })
-      .catch((err) => {
-        console.error("Save failed:", err);
-        setHint("Save failed — check your connection.");
-      });
+  async function persistSaveAsync() {
+    const toSave = blockOrder.filter(
+      (bid) => !blocks[bid].block_id || blocks[bid]._dirty,
+    );
+    if (toSave.length === 0) return { ok: true };
+
+    const results = await Promise.all(
+      toSave.map((bid) => saveOneBlock(bid).then((r) => ({ bid, r }))),
+    );
+    const failed = results.find((x) => x.r && x.r.success === false);
+    if (failed) {
+      return {
+        ok: false,
+        message: (failed.r && failed.r.message) || "Save failed",
+      };
+    }
+    toSave.forEach((bid) => {
+      blocks[bid]._dirty = false;
+    });
+    return { ok: true };
   }
 
   function persistLoad() {
     fetch(API_BLOCKS)
       .then((r) => r.json())
       .then((res) => {
-        if (res.success === false) {
+        if (res.success === false)
           throw new Error(res.message || "Load failed");
-        }
 
         const rows = Array.isArray(res.data) ? res.data : res.data.blocks || [];
-
         blocks = {};
         blockOrder = [];
-
         let stagedIndex = 0;
 
         rows.forEach((row) => {
           let pts = null;
-
           if (row.coordinates) {
             try {
               pts =
@@ -372,8 +440,8 @@ const MAP = (() => {
 
           let placedOnGrid = false;
           if (!Array.isArray(pts) || pts.length < 3) {
-            const side = 4 * CELL;
-            const perRow = 5;
+            const side = 4 * CELL,
+              perRow = 5;
             const px = 40 + (stagedIndex % perRow) * (side + 20);
             const py = 40 + Math.floor(stagedIndex / perRow) * (side + 20);
             pts = rectToPoints(px, py, side, side);
@@ -393,21 +461,18 @@ const MAP = (() => {
             coordinates: pts,
             rows: parseInt(row.rows, 10) || 0,
             cols: parseInt(row.cols, 10) || 0,
-            shape: row.shape || "rectangle",
             custom: row.custom == 1,
             remarks: row.remarks || null,
             needsPlacement: placedOnGrid,
-
             total_graves: parseInt(row.total_graves, 10) || 0,
             vacant_count: parseInt(row.vacant, 10) || 0,
             occupied_count: parseInt(row.occupied, 10) || 0,
-
             x: Math.min(...xs),
             y: Math.min(...ys),
             w: Math.max(...xs) - Math.min(...xs),
             h: Math.max(...ys) - Math.min(...ys),
+            _dirty: false,
           };
-
           syncBounds(blocks[bid]);
           blockOrder.push(bid);
         });
@@ -420,27 +485,20 @@ const MAP = (() => {
         const needsPlacement = Object.values(blocks).some(
           (b) => b.needsPlacement,
         );
-        if (needsPlacement) {
-          setHint(
-            'Some blocks need placement — click "Edit Layout" to drag them into position.',
-          );
-        } else {
-          setHint(
-            'Click "Add Block" to create one, or "Edit Layout" to rearrange existing blocks.',
-          );
-        }
+        setHint(
+          needsPlacement
+            ? 'Some blocks need placement — click "Edit Layout" to drag them into position.'
+            : 'Click "Add Block" to create one, or "Edit Layout" to rearrange existing blocks.',
+        );
       })
       .catch((err) => {
         console.error("Load failed:", err);
         const el = $("mapLoading");
         if (el) el.textContent = "Failed to load map.";
         setHint("Could not load blocks from server.");
+        if (window.showAlertTOP)
+          showAlertTOP("Could not load blocks from server.", "error");
       });
-  }
-
-  function flashSaved() {
-    setHint("Map saved successfully!");
-    setTimeout(() => setHint(""), 3000);
   }
 
   // ── CANVAS RENDER ENGINE ─────────────────────────────────────────────────
@@ -482,10 +540,8 @@ const MAP = (() => {
       );
       ctx.closePath();
 
-      // Determine colors based on occupancy
       let fill = "#dbeafe",
         stroke = "#3b82f6";
-
       if (b.needsPlacement) {
         fill = "#fef3c7";
         stroke = "#f59e0b";
@@ -501,8 +557,6 @@ const MAP = (() => {
           stroke = "#eab308";
         }
       }
-
-      // Override colors for active states
       if (isResh) {
         fill = "#fef9c3";
         stroke = "#f59e0b";
@@ -519,11 +573,9 @@ const MAP = (() => {
       ctx.fill();
       ctx.stroke();
 
-      // Draw Resize Handle (bottom-right corner)
       if (mapEditMode && hov && !reshapeMode && !blockDrag.active) {
-        const hx = bounds.x + bounds.w;
-        const hy = bounds.y + bounds.h;
-
+        const hx = bounds.x + bounds.w,
+          hy = bounds.y + bounds.h;
         ctx.beginPath();
         ctx.arc(hx, hy, 6, 0, Math.PI * 2);
         ctx.fillStyle = "#3b82f6";
@@ -536,7 +588,6 @@ const MAP = (() => {
       const label = labelAnchor(pts);
       const roomy = bounds.h >= 56;
 
-      // Draw Text Labels
       ctx.fillStyle = "#1e3a5f";
       ctx.font = "500 13px Inter, sans-serif";
       ctx.textAlign = "center";
@@ -547,7 +598,7 @@ const MAP = (() => {
         ctx.font = "10px Inter, sans-serif";
         ctx.fillText(`${b.rows}\u00d7${b.cols}`, label.x, label.y + 2);
         ctx.fillText(
-          `${occ} occ \u00b7 ${total - occ} avail`,
+          `${occ} occupied \u00b7 ${total - occ} vacant`,
           label.x,
           label.y + 16,
         );
@@ -556,7 +607,6 @@ const MAP = (() => {
       if (!reshapeMode && !isDrag && !isResize && roomy) {
         const footY = bounds.y + bounds.h - 8;
         const hintY = pointInPoly(label.x, footY, pts) ? footY : label.y + 30;
-
         ctx.fillStyle = mapEditMode ? "#3b82f6" : "#2563eb";
         ctx.font = "10px Inter, sans-serif";
         ctx.fillText(
@@ -568,11 +618,8 @@ const MAP = (() => {
         );
       }
 
-      if (isResh && pendingSplit) {
-        drawSplitPreview();
-      }
+      if (isResh && pendingSplit) drawSplitPreview();
 
-      // Draw Reshape mode markers and lines
       if (isResh && !pendingSplit) {
         pts.forEach((p, i) => {
           const next = pts[(i + 1) % pts.length];
@@ -581,7 +628,6 @@ const MAP = (() => {
           ctx.fillStyle = "rgba(99,102,241,0.5)";
           ctx.fill();
         });
-
         pts.forEach((p) => {
           ctx.beginPath();
           ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -598,20 +644,14 @@ const MAP = (() => {
           drawPoints.forEach((p, i) => {
             if (i > 0) ctx.lineTo(p.x, p.y);
           });
-
           const edge = closestEdge(pts, mousePos.x, mousePos.y);
-          if (edge && edge.dist < 20) {
-            ctx.lineTo(edge.point.x, edge.point.y);
-          } else {
-            ctx.lineTo(mousePos.x, mousePos.y);
-          }
-
+          if (edge && edge.dist < 20) ctx.lineTo(edge.point.x, edge.point.y);
+          else ctx.lineTo(mousePos.x, mousePos.y);
           ctx.strokeStyle = "#22c55e";
           ctx.lineWidth = 2;
           ctx.setLineDash([5, 3]);
           ctx.stroke();
           ctx.setLineDash([]);
-
           drawPoints.forEach((p) => {
             ctx.beginPath();
             ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -635,7 +675,6 @@ const MAP = (() => {
         }
       }
 
-      // Draw Drag Guideline
       if (isDrag) {
         const gx = snap(blockDrag.dx) - blockDrag.dx;
         const gy = snap(blockDrag.dy) - blockDrag.dy;
@@ -661,7 +700,6 @@ const MAP = (() => {
   function drawSplitPreview() {
     const keep = pendingSplit.keep === "a" ? pendingSplit.a : pendingSplit.b;
     const drop = pendingSplit.keep === "a" ? pendingSplit.b : pendingSplit.a;
-
     const trace = (poly) => {
       ctx.beginPath();
       poly.forEach((p, i) =>
@@ -669,7 +707,6 @@ const MAP = (() => {
       );
       ctx.closePath();
     };
-
     trace(drop);
     ctx.fillStyle = "rgba(148,163,184,0.35)";
     ctx.fill();
@@ -688,11 +725,9 @@ const MAP = (() => {
 
     ctx.font = "600 11px Inter, sans-serif";
     ctx.textAlign = "center";
-
     const kc = polyCentroid(keep);
     ctx.fillStyle = "#15803d";
     ctx.fillText("KEEP", kc.x, kc.y - 20);
-
     const dc = polyCentroid(drop);
     ctx.fillStyle = "#64748b";
     ctx.fillText("REMOVE", dc.x, dc.y - 20);
@@ -736,7 +771,6 @@ const MAP = (() => {
     if (onEdge) {
       const startPt = drawPoints[0];
       const endPoint = { x: snap(edge.point.x), y: snap(edge.point.y) };
-
       if (dist(endPoint, startPt) < 10 && drawPoints.length < 2) return;
 
       const split = splitPolygon(
@@ -778,17 +812,14 @@ const MAP = (() => {
     let pt1 = { x: start.x, y: start.y },
       pt2 = { x: end.x, y: end.y };
     const midPoints = mid.map((p) => ({ x: p.x, y: p.y }));
-
     pt1.x = snap(pt1.x);
     pt1.y = snap(pt1.y);
     pt2.x = snap(pt2.x);
     pt2.y = snap(pt2.y);
-
     for (let i = 0; i < midPoints.length; i++) {
       midPoints[i].x = snap(midPoints[i].x);
       midPoints[i].y = snap(midPoints[i].y);
     }
-
     if (idx1 === idx2) {
       if (dist(pts[idx1], pt1) > dist(pts[idx1], pt2)) {
         [pt1, pt2] = [pt2, pt1];
@@ -799,11 +830,9 @@ const MAP = (() => {
       [pt1, pt2] = [pt2, pt1];
       midPoints.reverse();
     }
-
     const workPts = [...pts];
     workPts.splice(idx2 + 1, 0, { ...pt2 });
     workPts.splice(idx1 + 1, 0, { ...pt1 });
-
     const i1 = idx1 + 1,
       i2 = idx2 + 2;
     const chain = (from, to) => {
@@ -814,7 +843,6 @@ const MAP = (() => {
       }
       return out;
     };
-
     const a = [
       pt1,
       ...chain(i1, i2).slice(1, -1),
@@ -822,7 +850,6 @@ const MAP = (() => {
       ...midPoints.slice().reverse(),
     ];
     const b = [pt1, ...midPoints, pt2, ...chain(i2, i1).slice(1, -1)];
-
     if (a.length < 3 || b.length < 3) return null;
     return { a, b };
   }
@@ -830,14 +857,9 @@ const MAP = (() => {
   function pickSplitSide(mx, my) {
     const inA = pointInPoly(mx, my, pendingSplit.a);
     const inB = pointInPoly(mx, my, pendingSplit.b);
-
-    if (inA && !inB) {
-      pendingSplit.keep = "a";
-    } else if (inB && !inA) {
-      pendingSplit.keep = "b";
-    } else {
-      pendingSplit.keep = pendingSplit.keep === "a" ? "b" : "a";
-    }
+    if (inA && !inB) pendingSplit.keep = "a";
+    else if (inB && !inA) pendingSplit.keep = "b";
+    else pendingSplit.keep = pendingSplit.keep === "a" ? "b" : "a";
     draw();
   }
 
@@ -850,28 +872,18 @@ const MAP = (() => {
   function keepSplitSide() {
     if (!pendingSplit) return;
     const blk = blocks[reshapeBid];
-
     reshapeHistory.push({
       coordinates: blk.coordinates.map((p) => ({ ...p })),
-      shape: blk.shape,
       custom: !!blk.custom,
     });
-
     blk.coordinates =
       pendingSplit.keep === "a" ? pendingSplit.a : pendingSplit.b;
-    blk.shape = "polygon";
     blk.custom = true;
     syncBounds(blk);
     pendingSplit = null;
-
     hasUnsavedChanges = true;
-
-    // ── Update the button to Save Changes ──
-    $("btnSaveMap").textContent = "Save Changes";
-    $("btnSaveMap").style.background = "#22c55e";
-    $("btnSaveMap").style.color = "#ffffff";
-    $("btnSaveMap").style.border = "none";
-
+    blk._dirty = true;
+    setSaveBtnDirty();
     updateReshapeToolbar();
     setHint(RESHAPE_HINT);
     draw();
@@ -889,12 +901,12 @@ const MAP = (() => {
     if (!reshapeHistory.length) return;
     const prev = reshapeHistory.pop();
     const blk = blocks[reshapeBid];
-
     blk.coordinates = prev.coordinates;
-    blk.shape = prev.shape;
     blk.custom = prev.custom;
     syncBounds(blk);
-
+    blk._dirty = true;
+    hasUnsavedChanges = true;
+    setSaveBtnDirty();
     drawPoints = [];
     pendingSplit = null;
     updateReshapeToolbar();
@@ -912,18 +924,20 @@ const MAP = (() => {
       ) {
         if (e.cancelable) e.preventDefault();
       }
-
       const { x, y } = getXY(e);
       mousePos = { x, y };
 
       if (blockDrag.active) {
-        blockDrag.dx = x - blockDrag.startX;
-        blockDrag.dy = y - blockDrag.startY;
+        const b = polyBounds(blockDrag.origPts);
+        const rawDx = x - blockDrag.startX;
+        const rawDy = y - blockDrag.startY;
+        const { dx, dy } = clampTranslate(b, rawDx, rawDy);
+        blockDrag.dx = dx;
+        blockDrag.dy = dy;
         const blk = blocks[blockDrag.bid];
-
         blk.coordinates = blockDrag.origPts.map((p) => ({
-          x: p.x + blockDrag.dx,
-          y: p.y + blockDrag.dy,
+          x: p.x + dx,
+          y: p.y + dy,
         }));
         syncBounds(blk);
         scheduleDraw();
@@ -931,12 +945,17 @@ const MAP = (() => {
       }
 
       if (resizeDrag.active) {
-        const dx = snap(x - resizeDrag.startX),
-          dy = snap(y - resizeDrag.startY);
-        const newW = Math.max(CELL * 2, resizeDrag.origW + dx),
-          newH = Math.max(CELL * 2, resizeDrag.origH + dy);
+        const rawDx = snap(x - resizeDrag.startX);
+        const rawDy = snap(y - resizeDrag.startY);
+        const { newW, newH } = clampResize(
+          resizeDrag.origX,
+          resizeDrag.origY,
+          resizeDrag.origW,
+          resizeDrag.origH,
+          rawDx,
+          rawDy,
+        );
         const blk = blocks[resizeDrag.bid];
-
         if (resizeDrag.isCustom) {
           blk.coordinates = scalePolyTo(
             resizeDrag.origPts,
@@ -953,7 +972,6 @@ const MAP = (() => {
             newH,
           );
         }
-
         syncBounds(blk);
         scheduleDraw();
         return;
@@ -1003,7 +1021,6 @@ const MAP = (() => {
           const bid = blockOrder[i],
             b = blocks[bid];
           if (b.needsPlacement) continue;
-
           const bounds = polyBounds(ensurePolygon(b));
           if (
             Math.sqrt(
@@ -1026,10 +1043,8 @@ const MAP = (() => {
             return;
           }
         }
-
         const bid = hitBlock(x, y);
         if (!bid) return;
-
         blockDrag = {
           active: true,
           bid,
@@ -1054,13 +1069,9 @@ const MAP = (() => {
         resizeDrag.active = false;
         canvasWrap.style.cursor = "grab";
         setHint("Click a block to change its shape, or drag it to move it.");
-
         hasUnsavedChanges = true;
-        $("btnSaveMap").textContent = "Save Changes";
-        $("btnSaveMap").style.background = "#22c55e"; // Turn green
-        $("btnSaveMap").style.color = "#ffffff";
-        $("btnSaveMap").style.border = "none";
-
+        blocks[resizeDrag.bid]._dirty = true;
+        setSaveBtnDirty();
         draw();
         return;
       }
@@ -1069,24 +1080,21 @@ const MAP = (() => {
         const bid = blockDrag.bid,
           blk = blocks[bid];
         const isClick = Math.hypot(blockDrag.dx, blockDrag.dy) < 5;
-
         if (isClick) {
           blk.coordinates = blockDrag.origPts;
         } else {
+          const b = polyBounds(blockDrag.origPts);
           const dx = snap(blockDrag.dx),
             dy = snap(blockDrag.dy);
+          const { dx: fdx, dy: fdy } = clampTranslate(b, dx, dy);
           blk.coordinates = blockDrag.origPts.map((p) => ({
-            x: p.x + dx,
-            y: p.y + dy,
+            x: p.x + fdx,
+            y: p.y + fdy,
           }));
-
           hasUnsavedChanges = true;
-          $("btnSaveMap").textContent = "Save Changes";
-          $("btnSaveMap").style.background = "#22c55e"; // Turn green
-          $("btnSaveMap").style.color = "#ffffff";
-          $("btnSaveMap").style.border = "none";
+          blk._dirty = true;
+          setSaveBtnDirty();
         }
-
         syncBounds(blk);
         blockDrag.active = false;
         canvasWrap.style.cursor = "grab";
@@ -1105,11 +1113,9 @@ const MAP = (() => {
         scheduleDraw();
       }
     });
-
     window.addEventListener("mousemove", (e) => {
       if (blockDrag.active || resizeDrag.active) handleMove(e);
     });
-
     window.addEventListener("mousedown", handleDown);
     cv.addEventListener("mouseup", handleUp);
     cv.addEventListener("touchmove", handleMove, { passive: false });
@@ -1142,9 +1148,8 @@ const MAP = (() => {
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && reshapeMode) {
-        if (pendingSplit) {
-          cancelSplit();
-        } else {
+        if (pendingSplit) cancelSplit();
+        else {
           drawPoints = [];
           updateReshapeToolbar();
           draw();
@@ -1157,12 +1162,40 @@ const MAP = (() => {
   function initButtons() {
     $("btnEditMap").addEventListener("click", enterEditMap);
 
-    $("btnSaveMap").addEventListener("click", () => {
-      if (hasUnsavedChanges) {
-        persistSave();
+    $("btnSaveMap").addEventListener("click", async () => {
+      const btn = $("btnSaveMap");
+      if (!hasUnsavedChanges) {
         exitEditMap();
-      } else {
+        return;
+      }
+
+      const origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML =
+        '<i class="fas fa-spinner fa-spin" style="margin-right:6px"></i>Saving…';
+
+      try {
+        const result = await persistSaveAsync();
+        if (!result.ok) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+          setHint("Save failed: " + (result.message || "unknown error"));
+          if (window.showAlertTOP) {
+            showAlertTOP(
+              "Save failed: " + (result.message || "unknown error"),
+              "error",
+            );
+          }
+          return;
+        }
         exitEditMap();
+        if (window.showAlertTOP) showAlertTOP("Map saved.", "success");
+      } catch (err) {
+        console.error("Save failed:", err);
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+        if (window.showAlertTOP)
+          showAlertTOP("Save failed — check your connection.", "error");
       }
     });
 
@@ -1176,18 +1209,17 @@ const MAP = (() => {
   function enterEditMap() {
     mapEditMode = true;
     hasUnsavedChanges = false;
-
     $("btnEditMap").style.display = "none";
 
-    // Change button to Cancel Edit (gray)
-    $("btnSaveMap").textContent = "Cancel Edit";
-    $("btnSaveMap").style.background = "#f1f5f9";
-    $("btnSaveMap").style.color = "#475569";
-    $("btnSaveMap").style.border = "1px solid #cbd5e1";
-    $("btnSaveMap").style.display = "";
+    const saveBtn = $("btnSaveMap");
+    saveBtn.textContent = "Cancel Edit";
+    saveBtn.style.background = "#f1f5f9";
+    saveBtn.style.color = "#475569";
+    saveBtn.style.border = "1px solid #cbd5e1";
+    saveBtn.style.display = "";
+    saveBtn.disabled = false;
 
     $("btnAddBlock").style.display = "none";
-
     setHint(
       "Click a block to change its shape, drag to move, or grab the corner dot to resize.",
     );
@@ -1199,25 +1231,26 @@ const MAP = (() => {
     blockDrag.active = false;
     resizeDrag.active = false;
     mapEditMode = false;
+    hasUnsavedChanges = false;
     hoveredBlock = null;
+    blockOrder.forEach((bid) => {
+      blocks[bid]._dirty = false;
+    });
 
     canvasWrap.style.cursor = "default";
     $("btnEditMap").style.display = "";
     $("btnSaveMap").style.display = "none";
 
-    // Reset button back to Save Layout (green)
-    $("btnSaveMap").textContent = "Save Layout";
-    $("btnSaveMap").style.background = "#22c55e";
-    $("btnSaveMap").style.color = "#ffffff";
-    $("btnSaveMap").style.border = "none";
+    const saveBtn = $("btnSaveMap");
+    saveBtn.textContent = "Save Layout";
+    saveBtn.style.background = "#22c55e";
+    saveBtn.style.color = "#ffffff";
+    saveBtn.style.border = "none";
+    saveBtn.disabled = false;
 
     $("btnAddBlock").style.display = "";
     setHint("");
     draw();
-  }
-
-  function setHint(t) {
-    if ($("mapHint")) $("mapHint").textContent = t;
   }
 
   // ── RESHAPE TOOLBAR STATE ────────────────────────────────────────────────
@@ -1230,10 +1263,8 @@ const MAP = (() => {
     reshapeHistory = [];
     drawPoints = [];
     pendingSplit = null;
-
     $("btnAddBlock").style.display = "none";
     $("btnSaveMap").style.display = "none";
-
     updateReshapeToolbar();
     canvasWrap.style.cursor = "crosshair";
     closeModal();
@@ -1256,7 +1287,6 @@ const MAP = (() => {
     const show = (id, on) => {
       if ($(id)) $(id).style.display = on ? "" : "none";
     };
-
     show("btnKeepSide", choosing);
     show("btnSwapSide", choosing);
     show("btnDoneReshape", reshapeMode && !choosing);
@@ -1272,7 +1302,6 @@ const MAP = (() => {
     reshapeHistory = [];
     drawPoints = [];
     pendingSplit = null;
-    // DO NOT show btnAddBlock here, let exitEditMap handle it.
     updateReshapeToolbar();
   }
 
@@ -1327,10 +1356,15 @@ const MAP = (() => {
     const step = CELL * 2,
       perRow = 6,
       i = blockOrder.length;
-    return {
-      bx: snap(60 + (i % perRow) * step),
-      by: snap(60 + Math.floor(i / perRow) * step),
-    };
+    let bx = snap(60 + (i % perRow) * step);
+    let by = snap(60 + Math.floor(i / perRow) * step);
+
+    // Clamp so the block fits (or at least starts within) the canvas.
+    const maxBx = Math.max(8, cvW - bw - 8);
+    const maxBy = Math.max(8, cvH - bh - 8);
+    bx = snap(Math.max(8, Math.min(maxBx, bx)));
+    by = snap(Math.max(8, Math.min(maxBy, by)));
+    return { bx, by };
   }
 
   function openAddBlockModal() {
@@ -1358,54 +1392,92 @@ const MAP = (() => {
     $("modalConfirm").textContent = "Save";
     $("modalConfirm").className = "btnPrimary";
     $("modalConfirm").style.display = "";
+    $("modalConfirm").disabled = false;
 
-    $("modalConfirm").onclick = () => {
+    $("modalConfirm").onclick = async () => {
       const name = validatedName("fBn", "fBnErr");
       if (!name) return;
 
-      const rows = Math.max(0, parseInt($("fBr").value, 10) || 0),
-        cols = Math.max(0, parseInt($("fBc").value, 10) || 0);
-      const blockType = $("fBt").value,
-        imageUrl = normalizeImageUrl($("fBImg").value);
+      const rows = Math.max(0, parseInt($("fBr").value, 10) || 0);
+      const cols = Math.max(0, parseInt($("fBc").value, 10) || 0);
+      const blockType = $("fBt").value;
+      const imageUrl = normalizeImageUrl($("fBImg").value);
 
-      const bw = cols * CELL || CELL * 4,
-        bh = rows * CELL || CELL * 4;
+      const bw = cols * CELL || CELL * 4;
+      const bh = rows * CELL || CELL * 4;
       const { bx, by } = nextBlockPosition(bw, bh);
       const points = rectToPoints(bx, by, bw, bh);
 
-      const bid = uid();
-      blocks[bid] = {
-        block_id: null,
+      const payload = {
         block_name: name,
         block_type: blockType,
         image_link: imageUrl,
-        coordinates: points,
+        coordinates: JSON.stringify(points),
+        custom: 0,
         rows,
         cols,
-        shape: "rectangle",
-        custom: false,
-        remarks: null,
-        x: bx,
-        y: by,
-        w: bw,
-        h: bh,
-        total_graves: rows * cols,
-        vacant_count: rows * cols,
-        occupied_count: 0,
       };
 
-      blockOrder.push(bid);
-      persistSave();
-      closeModal();
+      setModalBusy(true);
+      try {
+        const res = await fetch(API_BLOCKS, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
 
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          syncCanvasSize();
-          draw();
-          updateStatus();
-          setHint('Block added! Use "Edit Layout" to move or edit it.');
-        }),
-      );
+        if (res.success === false) {
+          setModalBusy(false);
+          if (window.showAlertTOP) {
+            showAlertTOP(
+              "Failed: " + (res.message || "unknown error"),
+              "error",
+            );
+          }
+          return;
+        }
+
+        const serverId = res.data && res.data.block_id;
+        const newBid = serverId ? "b" + serverId : uid();
+
+        blocks[newBid] = {
+          block_id: serverId || null,
+          block_name: name,
+          block_type: blockType,
+          image_link: imageUrl,
+          coordinates: points,
+          rows,
+          cols,
+          custom: false,
+          remarks: null,
+          x: bx,
+          y: by,
+          w: bw,
+          h: bh,
+          total_graves: rows * cols,
+          vacant_count: rows * cols,
+          occupied_count: 0,
+          _dirty: false,
+        };
+        blockOrder.push(newBid);
+
+        closeModal();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            syncCanvasSize();
+            draw();
+            updateStatus();
+            setHint('Block added! Use "Edit Layout" to move or edit it.');
+            if (window.showAlertTOP) showAlertTOP("Block added.", "success");
+          }),
+        );
+      } catch (err) {
+        console.error("Add block failed:", err);
+        setModalBusy(false);
+        if (window.showAlertTOP) {
+          showAlertTOP("Save failed — check your connection.", "error");
+        }
+      }
     };
 
     $("modalCancel").textContent = "Cancel";
@@ -1455,22 +1527,22 @@ const MAP = (() => {
       <div class="modalRowPair" style="margin-top:10px">
         <div class="viewInfoBox" style="text-align:center">
           <p style="font-size:11px;color:#94a3b8;margin:0">Vacant</p>
-          <p style="font-size:18px;font-weight:700;color:#0f172a;margin:2px 0 0">${avail}</p>
+          <p id="statVacant-${bid}" style="font-size:18px;font-weight:700;color:#0f172a;margin:2px 0 0">${avail}</p>
         </div>
         <div class="viewInfoBox" style="text-align:center">
           <p style="font-size:11px;color:#94a3b8;margin:0">Occupied</p>
-          <p style="font-size:18px;font-weight:700;color:#166534;margin:2px 0 0">${occ}</p>
+          <p id="statOccupied-${bid}" style="font-size:18px;font-weight:700;color:#166534;margin:2px 0 0">${occ}</p>
         </div>
       </div>
       
       <div class="modalRowPair" style="margin-top:10px">
         <div class="viewInfoBox" style="text-align:center">
           <p style="font-size:11px;color:#94a3b8;margin:0">Other</p>
-          <p style="font-size:16px;font-weight:600;color:#1e40af;margin:2px 0 0">${res}</p>
+          <p id="statOther-${bid}" style="font-size:16px;font-weight:600;color:#1e40af;margin:2px 0 0">${res}</p>
         </div>
         <div class="viewInfoBox" style="text-align:center;background:#f8fafc">
           <p style="font-size:11px;color:#94a3b8;margin:0">Capacity</p>
-          <p style="font-size:18px;font-weight:700;color:#0f172a;margin:2px 0 0">${total}</p>
+          <p id="statCapacity-${bid}" style="font-size:18px;font-weight:700;color:#0f172a;margin:2px 0 0">${total}</p>
         </div>
       </div>
       
@@ -1490,7 +1562,6 @@ const MAP = (() => {
         if (!res.success || !res.data || !res.data.graves) {
           throw new Error("Failed to load graves");
         }
-
         const graves = res.data.graves,
           container = $("gravesContainer");
 
@@ -1514,18 +1585,18 @@ const MAP = (() => {
           <div class="grave-grid" id="graveGridContainer">`;
 
         graves.forEach((g) => {
-          const occ =
+          const occG =
             g.occupants && g.occupants.length > 0 ? g.occupants[0] : null;
-          const occName = occ ? occ.deceased_name : null;
-
-          const dob = occ ? formatDate(occ.deceased_date_of_birth) : "--";
-          const dod = occ ? formatDate(occ.deceased_date_of_death) : "--";
-          const buried = occ ? formatDate(occ.date_buried) : "--";
-          const expiry = occ ? formatDate(occ.lease_expiration_date) : "--";
+          const occName = occG ? occG.deceased_name : null;
+          const dob = occG ? formatDate(occG.deceased_date_of_birth) : "--";
+          const dod = occG ? formatDate(occG.deceased_date_of_death) : "--";
+          const buried = occG ? formatDate(occG.date_buried) : "--";
+          const expiry = occG ? formatDate(occG.lease_expiration_date) : "--";
 
           const statusClass = g.status.toLowerCase();
           const searchData =
             `${g.grave_code} ${occName || ""} ${g.remarks || ""}`.toLowerCase();
+          const oldRemarks = (g.remarks || "").toLowerCase();
 
           const isEditable =
             g.status === "Vacant" ||
@@ -1543,7 +1614,7 @@ const MAP = (() => {
           }
 
           gridHtml += `
-            <div class="grave-card" data-search="${escHtml(searchData)}" id="grave-card-${g.grave_id}">
+            <div class="grave-card" data-search="${escHtml(searchData)}" data-old-remarks="${escHtml(oldRemarks)}" id="grave-card-${g.grave_id}">
               
               <div class="grave-card-header" style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px dashed #cbd5e1; padding-bottom:6px; margin-bottom:2px;">
                 <div>
@@ -1556,7 +1627,6 @@ const MAP = (() => {
                     isEditable
                       ? `
                     <div style="display:flex; align-items:center; gap:6px;">
-                      
                       <span id="badge-${g.grave_id}" class="grave-status ${statusClass}" style="${statusColor}">${escHtml(g.status)}</span>
                       
                       <div id="edit-wrap-${g.grave_id}" style="display:none; position:relative; align-items:center; ${statusColor} border-radius:4px; padding:2px 6px;">
@@ -1569,13 +1639,10 @@ const MAP = (() => {
                       </div>
                       
                       <button id="btn-edit-${g.grave_id}" onclick="MAP.enableGraveEdit(${g.grave_id})" class="btn" style="background:#eff6ff; color:#3b82f6; border:1px solid #bfdbfe; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:10px;" title="Edit"><i class="fas fa-pen"></i></button>
-                      <button id="btn-save-${g.grave_id}" onclick="MAP.saveGraveEdits(${g.grave_id})" class="btn" style="display:none; background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:10px;" title="Save"><i class="fas fa-save"></i></button>
-                    
-                    </div>
-                  `
+                      <button id="btn-save-${g.grave_id}" onclick="MAP.saveGraveEdits(${g.grave_id}, '${bid}')" class="btn" style="display:none; background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:10px;" title="Save"><i class="fas fa-save"></i></button>
+                    </div>`
                       : `
-                    <span class="grave-status ${statusClass}" style="${statusColor}">${escHtml(g.status)}</span>
-                  `
+                    <span class="grave-status ${statusClass}" style="${statusColor}">${escHtml(g.status)}</span>`
                   }
                 </div>
               </div>
@@ -1609,6 +1676,20 @@ const MAP = (() => {
       });
   }
 
+  function updateModalStats(bid) {
+    const b = blocks[bid];
+    if (!b) return;
+    const s = blockStats(b);
+    const set = (id, val) => {
+      const el = $(id);
+      if (el) el.textContent = val;
+    };
+    set(`statVacant-${bid}`, s.avail);
+    set(`statOccupied-${bid}`, s.occ);
+    set(`statOther-${bid}`, s.res);
+    set(`statCapacity-${bid}`, s.total);
+  }
+
   // ── GRAVE EDIT HELPERS ───────────────────────────────────────────────────
   const graveDrafts = {};
 
@@ -1632,12 +1713,12 @@ const MAP = (() => {
   }
 
   function enableGraveEdit(id) {
-    const badge = document.getElementById(`badge-${id}`),
-      editWrap = document.getElementById(`edit-wrap-${id}`);
-    const btnEdit = document.getElementById(`btn-edit-${id}`),
-      btnSave = document.getElementById(`btn-save-${id}`);
-    const viewRemarks = document.getElementById(`remarks-view-${id}`),
-      inputRemarks = document.getElementById(`remarks-input-${id}`);
+    const badge = document.getElementById(`badge-${id}`);
+    const editWrap = document.getElementById(`edit-wrap-${id}`);
+    const btnEdit = document.getElementById(`btn-edit-${id}`);
+    const btnSave = document.getElementById(`btn-save-${id}`);
+    const viewRemarks = document.getElementById(`remarks-view-${id}`);
+    const inputRemarks = document.getElementById(`remarks-input-${id}`);
 
     if (badge) badge.style.display = "none";
     if (editWrap) editWrap.style.display = "inline-flex";
@@ -1650,73 +1731,127 @@ const MAP = (() => {
     }
   }
 
-  function saveGraveEdits(id) {
-    const select = document.getElementById(`select-${id}`),
-      inputRemarks = document.getElementById(`remarks-input-${id}`);
+  async function saveGraveEdits(id, bid) {
+    const select = document.getElementById(`select-${id}`);
+    const inputRemarks = document.getElementById(`remarks-input-${id}`);
     const btnSave = document.getElementById(`btn-save-${id}`);
+    const badge = document.getElementById(`badge-${id}`);
+    if (!btnSave) return;
 
-    const newStatus = select ? select.value : null,
-      newRemarks = inputRemarks ? inputRemarks.value.trim() : "";
+    const oldStatus = badge ? badge.textContent.trim() : null;
+    const newStatus = select ? select.value : null;
+    const newRemarks = inputRemarks ? inputRemarks.value.trim() : "";
     const finalStatus =
       graveDrafts[id] && graveDrafts[id].status
         ? graveDrafts[id].status
         : newStatus;
 
-    btnSave.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    if (select) select.disabled = true;
+    if (inputRemarks) inputRemarks.disabled = true;
     btnSave.disabled = true;
+    btnSave.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-    fetch(`api/graves.php/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: finalStatus, remarks: newRemarks }),
-    })
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.success === false) {
-          alert("Failed to save: " + (res.message || "Unknown error"));
-          btnSave.innerHTML = '<i class="fas fa-save"></i>';
-          btnSave.disabled = false;
-        } else {
-          const badge = document.getElementById(`badge-${id}`),
-            editWrap = document.getElementById(`edit-wrap-${id}`);
-          const btnEdit = document.getElementById(`btn-edit-${id}`),
-            viewRemarks = document.getElementById(`remarks-view-${id}`);
+    try {
+      const res = await fetch(`api/graves.php/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: finalStatus, remarks: newRemarks }),
+      }).then((r) => r.json());
 
-          if (badge) {
-            badge.textContent = finalStatus;
-            badge.className = `grave-status ${finalStatus.toLowerCase()}`;
-
-            let colorStr =
-              "background-color: #dcfce7; color: #166534; border: 1px solid #86efac;";
-            if (finalStatus === "Occupied") {
-              colorStr =
-                "background-color: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;";
-            } else if (finalStatus === "Other") {
-              colorStr =
-                "background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;";
-            }
-            badge.style.cssText = colorStr;
-            badge.style.display = "inline-block";
-          }
-
-          if (editWrap) editWrap.style.display = "none";
-          if (btnEdit) btnEdit.style.display = "inline-block";
-          if (viewRemarks) {
-            viewRemarks.textContent = newRemarks || "No remarks";
-            viewRemarks.style.display = "block";
-          }
-          if (inputRemarks) inputRemarks.style.display = "none";
-
-          btnSave.style.display = "none";
-          btnSave.innerHTML = '<i class="fas fa-save"></i>';
-          btnSave.disabled = false;
+      if (res.success === false) {
+        if (window.showAlertTOP) {
+          showAlertTOP(
+            "Failed to save: " + (res.message || "Unknown error"),
+            "error",
+          );
         }
-      })
-      .catch((err) => {
-        alert("Connection error while saving.");
         btnSave.innerHTML = '<i class="fas fa-save"></i>';
         btnSave.disabled = false;
-      });
+        if (select) select.disabled = false;
+        if (inputRemarks) inputRemarks.disabled = false;
+        return;
+      }
+
+      // ── Update view mode ──
+      const editWrap = document.getElementById(`edit-wrap-${id}`);
+      const btnEdit = document.getElementById(`btn-edit-${id}`);
+      const viewRemarks = document.getElementById(`remarks-view-${id}`);
+
+      if (badge) {
+        badge.textContent = finalStatus;
+        badge.className = `grave-status ${finalStatus.toLowerCase()}`;
+        let colorStr =
+          "background-color: #dcfce7; color: #166534; border: 1px solid #86efac;";
+        if (finalStatus === "Occupied") {
+          colorStr =
+            "background-color: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;";
+        } else if (finalStatus === "Other") {
+          colorStr =
+            "background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;";
+        }
+        badge.style.cssText = colorStr;
+        badge.style.display = "inline-block";
+      }
+      if (editWrap) editWrap.style.display = "none";
+      if (btnEdit) btnEdit.style.display = "inline-block";
+      if (viewRemarks) {
+        viewRemarks.textContent = newRemarks || "No remarks";
+        viewRemarks.style.display = "block";
+      }
+      if (inputRemarks) inputRemarks.style.display = "none";
+      if (select) select.disabled = false;
+
+      btnSave.style.display = "none";
+      btnSave.innerHTML = '<i class="fas fa-save"></i>';
+      btnSave.disabled = false;
+
+      delete graveDrafts[id];
+
+      // ── Update parent block counts ──
+      if (bid && blocks[bid] && oldStatus && oldStatus !== finalStatus) {
+        const b = blocks[bid];
+        b.vacant_count = b.vacant_count || 0;
+        b.occupied_count = b.occupied_count || 0;
+
+        if (oldStatus === "Vacant")
+          b.vacant_count = Math.max(0, b.vacant_count - 1);
+        else if (oldStatus === "Occupied")
+          b.occupied_count = Math.max(0, b.occupied_count - 1);
+
+        if (finalStatus === "Vacant") b.vacant_count += 1;
+        else if (finalStatus === "Occupied") b.occupied_count += 1;
+
+        draw();
+        updateStatus();
+        updateModalStats(bid);
+      }
+
+      // ── Update search data on the card ──
+      const card = document.getElementById(`grave-card-${id}`);
+      if (card) {
+        const oldR = card.dataset.oldRemarks || "";
+        let searchData = card.dataset.search || "";
+        if (oldR) {
+          searchData = searchData
+            .split(oldR)
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim();
+        }
+        const newLower = newRemarks.toLowerCase();
+        if (newLower) searchData = (searchData + " " + newLower).trim();
+        card.dataset.search = searchData;
+        card.dataset.oldRemarks = newLower;
+      }
+    } catch (err) {
+      console.error("Grave save error:", err);
+      if (window.showAlertTOP)
+        showAlertTOP("Connection error while saving.", "error");
+      btnSave.innerHTML = '<i class="fas fa-save"></i>';
+      btnSave.disabled = false;
+      if (select) select.disabled = false;
+      if (inputRemarks) inputRemarks.disabled = false;
+    }
   }
 
   function toggleClearBtn(val) {
@@ -1735,73 +1870,70 @@ const MAP = (() => {
   }
 
   function filterGraves(query) {
-    const term = query.toLowerCase().trim(),
-      cards = document.querySelectorAll(".grave-card");
+    const term = query.toLowerCase().trim();
+    const cards = document.querySelectorAll(".grave-card");
     cards.forEach((card) => {
       const searchData = card.getAttribute("data-search") || "";
-      if (searchData.includes(term)) {
-        card.style.display = "flex";
-      } else {
-        card.style.display = "none";
-      }
+      card.style.display = searchData.includes(term) ? "flex" : "none";
     });
   }
 
   // ── EDIT BLOCK MODAL ─────────────────────────────────────────────────────
   function openBlockEditModal(bid) {
     curBlock = bid;
-    const b = blocks[bid],
-      hasGraves = (b.total_graves || 0) > 0;
+    const b = blocks[bid];
+    const hasGraves = (b.total_graves || 0) > 0;
 
     $("modalTitle").textContent = `Edit block — ${b.block_name}`;
 
     $("modalBody").innerHTML = `
-      <label>Block Name</label>
-      <input type="text" id="fEn" value="${escHtml(b.block_name)}">
-      <p id="fEnErr" class="modalNote" style="display:none;color:#ef4444;margin-top:4px"></p>
-      
-      ${
-        hasGraves
-          ? `
-        <p class="modalNote" style="color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:6px 8px;margin-top:6px;font-size:11px;line-height:1.4">
-          &#9888; This block has ${b.total_graves} grave(s). Renaming will also rewrite every grave code's prefix.
-        </p>
-      `
-          : ""
-      }
-      
-      <label style="margin-top:10px">Block Type</label>
-      <select id="fEt">
-        ${BLOCK_TYPES.map((t) => `<option value="${t}" ${b.block_type === t ? "selected" : ""}>${t}</option>`).join("")}
-      </select>
-      
-      <label style="margin-top:10px">Image URL</label>
-      <input type="text" id="fEImg" value="${escHtml(b.image_link || "")}" placeholder="https://example.com/image.jpg (optional)">
-      
-      <label style="margin-top:10px">Rows / Cols (changing these adjusts the grave grid)</label>
-      <div class="modalRowPair" style="margin-top:6px">
-        <div><label>Rows</label><input type="number" id="fEr" min="0" max="30" value="${b.rows}"></div>
-        <div><label>Cols</label><input type="number" id="fEc" min="0" max="30" value="${b.cols}"></div>
-      </div>
-      
-      <hr class="modalDivider">
-      <button class="warnBtn" style="margin-top:10px;background:#fff;color:#ef4444;border-color:#fca5a5" onclick="MAP.deleteBlock('${bid}')">Delete block</button>`;
+    <label>Block Name</label>
+    <input type="text" id="fEn" value="${escHtml(b.block_name)}">
+    <p id="fEnErr" class="modalNote" style="display:none;color:#ef4444;margin-top:4px"></p>
+    
+    <p id="fEnWarn" class="modalNote" style="color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:6px 8px;margin-top:6px;font-size:11px;line-height:1.4;display:${hasGraves ? "block" : "none"}">
+      &#9888; This block has ${b.total_graves || 0} grave(s). Renaming will also rewrite every grave code's prefix.
+    </p>
+    
+    <label style="margin-top:10px">Block Type</label>
+    <select id="fEt">
+      ${BLOCK_TYPES.map((t) => `<option value="${t}" ${b.block_type === t ? "selected" : ""}>${t}</option>`).join("")}
+    </select>
+    
+    <label style="margin-top:10px">Image URL</label>
+    <input type="text" id="fEImg" value="${escHtml(b.image_link || "")}" placeholder="https://example.com/image.jpg (optional)">
+    
+    <label style="margin-top:10px">Rows / Cols (changing these adjusts the grave grid)</label>
+    <div class="modalRowPair" style="margin-top:6px">
+      <div><label>Rows</label><input type="number" id="fEr" min="0" max="30" value="${b.rows}"></div>
+      <div><label>Cols</label><input type="number" id="fEc" min="0" max="30" value="${b.cols}"></div>
+    </div>
+    
+    <hr class="modalDivider">
+    <button class="warnBtn" style="margin-top:10px;background:#fff;color:#ef4444;border-color:#fca5a5" onclick="MAP.deleteBlock('${bid}')">Delete block</button>`;
 
     $("modalConfirm").textContent = "Save changes";
     $("modalConfirm").className = "btnPrimary";
     $("modalConfirm").style.display = "";
+    $("modalConfirm").disabled = false;
 
-    $("modalConfirm").onclick = () => {
+    $("modalConfirm").onclick = async () => {
       const name = validatedName("fEn", "fEnErr", bid);
       if (!name) return;
 
-      if (hasGraves && name !== b.block_name) {
-        if (
-          !window.confirm(
-            `"${b.block_name}" has ${b.total_graves} grave record(s).\n\nRenaming will update every grave code to start with "${name}-" so reports stay consistent.\n\nContinue?`,
-          )
-        )
-          return;
+      // Live check — not the captured `hasGraves` — so repeated saves in the
+      // same open modal still correctly prompt when renaming a block that has
+      // gained graves via this same modal.
+      if ((b.total_graves || 0) > 0 && name !== b.block_name) {
+        const proceed = await confirm_ui(
+          `"${b.block_name}" has ${b.total_graves} grave record(s).\n\nRenaming will update every grave code to start with "${name}-" so reports stay consistent.\n\nContinue?`,
+          {
+            title: "Rename block?",
+            confirmText: "Continue",
+            cancelText: "Cancel",
+          },
+        );
+        if (!proceed) return;
       }
 
       const blk = blocks[bid];
@@ -1811,41 +1943,70 @@ const MAP = (() => {
         image_link: normalizeImageUrl($("fEImg").value),
         rows: Math.max(0, parseInt($("fEr").value, 10) || 0),
         cols: Math.max(0, parseInt($("fEc").value, 10) || 0),
+        // Include geometry so _dirty = false is accurate even if the block
+        // had a pending drag when the modal was opened. Mirrors saveOneBlock().
+        coordinates: JSON.stringify(blk.coordinates),
+        custom: blk.custom ? 1 : 0,
       };
 
-      fetch(`${API_BLOCKS}/${blk.block_id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-        .then((r) => r.json())
-        .then((res) => {
-          if (res.success === false) {
-            setHint("Save failed: " + (res.message || "unknown error"));
-            return;
+      setModalBusy(true);
+      try {
+        const res = await fetch(`${API_BLOCKS}/${blk.block_id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+
+        if (res.success === false) {
+          setModalBusy(false);
+          setHint("Save failed: " + (res.message || "unknown error"));
+          if (window.showAlertTOP) {
+            showAlertTOP(
+              "Save failed: " + (res.message || "unknown error"),
+              "error",
+            );
           }
+          return;
+        }
 
-          blk.block_name = name;
-          blk.block_type = payload.block_type;
-          blk.image_link = payload.image_link;
-          blk.rows = payload.rows;
-          blk.cols = payload.cols;
+        blk.block_name = name;
+        blk.block_type = payload.block_type;
+        blk.image_link = payload.image_link;
+        blk.rows = payload.rows;
+        blk.cols = payload.cols;
+        blk._dirty = false;
+        if (res.data) {
+          blk.total_graves = res.data.total_graves;
+          blk.vacant_count = res.data.vacant;
+          blk.occupied_count = res.data.occupied;
+        }
 
-          if (res.data) {
-            blk.total_graves = res.data.total_graves;
-            blk.vacant_count = res.data.vacant;
-            blk.occupied_count = res.data.occupied;
+        // ── Keep the modal open; refresh only the parts that changed. ──
+        $("modalTitle").textContent = `Edit block — ${name}`;
+
+        const warnEl = $("fEnWarn");
+        if (warnEl) {
+          const n = blk.total_graves || 0;
+          if (n > 0) {
+            warnEl.innerHTML = `&#9888; This block has ${n} grave(s). Renaming will also rewrite every grave code's prefix.`;
+            warnEl.style.display = "block";
+          } else {
+            warnEl.style.display = "none";
           }
+        }
 
-          flashSaved();
-          closeModal();
-          draw();
-          updateStatus();
-        })
-        .catch((err) => {
-          console.error("Save failed:", err);
-          setHint("Save failed — check your connection.");
-        });
+        setModalBusy(false);
+        draw();
+        updateStatus();
+        if (window.showAlertTOP) showAlertTOP("Block updated.", "success");
+      } catch (err) {
+        console.error("Block edit failed:", err);
+        setModalBusy(false);
+        setHint("Save failed — check your connection.");
+        if (window.showAlertTOP) {
+          showAlertTOP("Save failed — check your connection.", "error");
+        }
+      }
     };
 
     $("modalCancel").textContent = "Cancel";
@@ -1866,19 +2027,28 @@ const MAP = (() => {
       <button class="reshapeModalBtn" style="margin-top:0" onclick="MAP.enterReshapeMode('${bid}')">&#9998; Reshape block (draw a line)</button>
       <p class="modalNote" style="margin-top:10px">Reshaping draws a line across the block and lets you keep either side. Drag the block on the canvas to move it.</p>`;
 
-    $("modalConfirm").textContent = "Save changes";
-    $("modalConfirm").className = "btnPrimary";
     $("modalConfirm").style.display = "none";
-
     $("modalCancel").textContent = "Close";
     $("modalCancel").onclick = closeModal;
     showModal();
   }
 
   // ── DELETE BLOCK ─────────────────────────────────────────────────────────
-  function deleteBlock(bid) {
+  async function deleteBlock(bid) {
     const b = blocks[bid];
+    if (!b) return;
+
     if (!b.block_id) {
+      const ok = await confirm_ui(
+        `Remove "${b.block_name}"? It has not been saved to the server yet.`,
+        {
+          title: "Remove block?",
+          confirmText: "Remove",
+          cancelText: "Cancel",
+          danger: true,
+        },
+      );
+      if (!ok) return;
       blockOrder = blockOrder.filter((id) => id !== bid);
       delete blocks[bid];
       if (curBlock === bid) curBlock = null;
@@ -1889,37 +2059,75 @@ const MAP = (() => {
       return;
     }
 
-    if ((b.total_graves || 0) > 0) {
-      if (
-        !window.confirm(
-          `Delete "${b.block_name}"?\n\nThis block contains ${b.total_graves} grave record(s). Deleting the block will also soft-delete all of its graves. Existing interment records that reference those graves will keep working, but the graves will no longer appear in any list.\n\nContinue?`,
-        )
-      )
-        return;
+    const msg =
+      (b.total_graves || 0) > 0
+        ? `Delete "${b.block_name}"?\n\nThis block contains ${b.total_graves} grave record(s). Deleting the block will also soft-delete all of its graves. Existing interment records that reference those graves will keep working, but the graves will no longer appear in any list.\n\nContinue?`
+        : `Delete "${b.block_name}"?\n\nThis cannot be undone from the map.`;
+
+    const ok = await confirm_ui(msg, {
+      title: "Delete block?",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (!ok) return;
+
+    const deleteBtn = document.querySelector("button.warnBtn");
+    if (deleteBtn) {
+      deleteBtn.disabled = true;
+      deleteBtn.innerHTML =
+        '<i class="fas fa-spinner fa-spin" style="margin-right:6px"></i>Deleting…';
     }
+    const cb = $("modalConfirm"),
+      cc = $("modalCancel");
+    if (cb) cb.disabled = true;
+    if (cc) cc.disabled = true;
 
-    fetch(`${API_BLOCKS}/${b.block_id}`, { method: "DELETE" })
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.success === false) {
-          setHint("Delete failed: " + (res.message || "unknown error"));
-          return;
+    try {
+      const res = await fetch(`${API_BLOCKS}/${b.block_id}`, {
+        method: "DELETE",
+      }).then((r) => r.json());
+
+      if (res.success === false) {
+        if (deleteBtn) {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = "Delete block";
         }
+        if (cb) cb.disabled = false;
+        if (cc) cc.disabled = false;
+        setHint("Delete failed: " + (res.message || "unknown error"));
+        if (window.showAlertTOP) {
+          showAlertTOP(
+            "Delete failed: " + (res.message || "unknown error"),
+            "error",
+          );
+        }
+        return;
+      }
 
-        blockOrder = blockOrder.filter((id) => id !== bid);
-        delete blocks[bid];
-        if (curBlock === bid) curBlock = null;
-        if (reshapeBid === bid) _clearReshape();
+      blockOrder = blockOrder.filter((id) => id !== bid);
+      delete blocks[bid];
+      if (curBlock === bid) curBlock = null;
+      if (reshapeBid === bid) _clearReshape();
 
-        closeModal();
-        draw();
-        updateStatus();
-        setHint("Block deleted.");
-      })
-      .catch((err) => {
-        console.error("Delete failed:", err);
-        setHint("Delete failed — check your connection.");
-      });
+      closeModal();
+      draw();
+      updateStatus();
+      setHint("Block deleted.");
+      if (window.showAlertTOP) showAlertTOP("Block deleted.", "success");
+    } catch (err) {
+      console.error("Delete failed:", err);
+      if (deleteBtn) {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = "Delete block";
+      }
+      if (cb) cb.disabled = false;
+      if (cc) cc.disabled = false;
+      setHint("Delete failed — check your connection.");
+      if (window.showAlertTOP) {
+        showAlertTOP("Delete failed — check your connection.", "error");
+      }
+    }
   }
 
   // ── GLOBAL MODAL OVERLAY ─────────────────────────────────────────────────
@@ -1928,11 +2136,25 @@ const MAP = (() => {
   }
 
   function closeModal() {
-    if (!$("modalOverlay")) return;
-    $("modalOverlay").classList.remove("open");
-    $("modalConfirm").style.display = "";
-    $("modalCancel").textContent = "Cancel";
-    $("modalCancel").onclick = closeModal;
+    const overlay = $("modalOverlay");
+    if (!overlay) return;
+    overlay.classList.remove("open");
+
+    const cb = $("modalConfirm"),
+      cc = $("modalCancel");
+    if (cb) {
+      if (cb.dataset._orig) {
+        cb.innerHTML = cb.dataset._orig;
+        delete cb.dataset._orig;
+      }
+      cb.disabled = false;
+      cb.style.display = "";
+    }
+    if (cc) {
+      cc.disabled = false;
+      cc.textContent = "Cancel";
+      cc.onclick = closeModal;
+    }
     pendingNavHref = null;
   }
 
@@ -1947,14 +2169,35 @@ const MAP = (() => {
     $("modalConfirm").textContent = "Save & leave";
     $("modalConfirm").className = "btnPrimary";
     $("modalConfirm").style.display = "";
+    $("modalConfirm").disabled = false;
 
-    $("modalConfirm").onclick = () => {
+    $("modalConfirm").onclick = async () => {
       const dest = pendingNavHref;
-      persistSave();
-      exitEditMap();
-      pendingNavHref = null;
-      closeModal();
-      if (dest) window.location.href = dest;
+      setModalBusy(true);
+      try {
+        const result = await persistSaveAsync();
+        if (!result.ok) {
+          setModalBusy(false);
+          setHint("Save failed: " + (result.message || "unknown error"));
+          if (window.showAlertTOP) {
+            showAlertTOP(
+              "Save failed: " + (result.message || "unknown error"),
+              "error",
+            );
+          }
+          return;
+        }
+        exitEditMap();
+        pendingNavHref = null;
+        closeModal();
+        if (dest) window.location.href = dest;
+      } catch (err) {
+        console.error("Save & leave failed:", err);
+        setModalBusy(false);
+        if (window.showAlertTOP) {
+          showAlertTOP("Save failed — check your connection.", "error");
+        }
+      }
     };
 
     $("modalCancel").textContent = "Stay here";
@@ -1976,11 +2219,9 @@ const MAP = (() => {
       if (!mapEditMode) return;
       const link = e.target.closest("a[href]");
       if (!link) return;
-
       const href = link.getAttribute("href");
       if (!href || href.startsWith("#") || href.startsWith("javascript:"))
         return;
-
       e.preventDefault();
       openUnsavedChangesModal(href);
     });
@@ -1997,16 +2238,15 @@ const MAP = (() => {
   function updateStatus() {
     let total = 0,
       occ = 0,
-      res = 0;
+      other = 0;
     blockOrder.forEach((bid) => {
       const s = blockStats(blocks[bid]);
       total += s.total;
       occ += s.occ;
-      res += s.res;
+      other += s.res;
     });
-
     $("mapStatus").textContent =
-      `${blockOrder.length} block(s) · Total: ${total} · Occupied: ${occ} · Other: ${res} · Vacant: ${total - occ - res}`;
+      `${blockOrder.length} block(s) \u00b7 Total: ${total} \u00b7 Occupied: ${occ} \u00b7 Other: ${other} \u00b7 Vacant: ${total - occ - other}`;
   }
 
   // ── INITIALIZATION ───────────────────────────────────────────────────────

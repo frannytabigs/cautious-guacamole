@@ -15,6 +15,7 @@ body {
   gap: 24px;
   padding: 24px;
   color: #333333;
+  overflow-x: hidden;
 
   label.required::after {
     content: " *";
@@ -59,8 +60,8 @@ body {
   }
 
   /* Optional: turn the field's label red while the error is active */
-  .formGroup:has(.inputError)>label,
-  .systemItem:has(.inputError)>label,
+  .formGroup:has(.inputError) > label,
+  .systemItem:has(.inputError) > label,
   .systemItem:has(.inputError) .labelRow label {
     color: #dc2626;
     transition: color 0.2s ease;
@@ -117,7 +118,7 @@ body {
     color: #111827;
   }
 
-  .cardTop>div>p {
+  .cardTop > div > p {
     margin: 6px 0 0;
     font-size: 14px;
     color: #6b7280;
@@ -146,7 +147,7 @@ body {
      ============================================================ */
   .importPreview {
     display: flex;
-    align-items: flex-start;        /* was: center — keep icon/btn on line 1 */
+    align-items: flex-start; /* was: center — keep icon/btn on line 1 */
     gap: 10px;
     margin-top: 12px;
     padding: 10px 12px;
@@ -160,11 +161,11 @@ body {
     display: none;
   }
 
-  .importPreview>i {
+  .importPreview > i {
     flex: 0 0 auto;
     font-size: 18px;
     color: #10b981;
-    margin-top: 1px;                /* nudge icon onto the first text line */
+    margin-top: 1px; /* nudge icon onto the first text line */
   }
 
   .importPreview .importFileName {
@@ -175,16 +176,16 @@ body {
     color: #1f2937;
 
     /* was: white-space: nowrap; overflow: hidden; text-overflow: ellipsis; */
-    white-space: normal;            /* allow wrapping to a new line          */
-    overflow-wrap: anywhere;        /* break long unbroken filenames         */
-    word-break: break-all;          /* filenames have no spaces — force break */
+    white-space: normal; /* allow wrapping to a new line          */
+    overflow-wrap: anywhere; /* break long unbroken filenames         */
+    word-break: break-all; /* filenames have no spaces — force break */
     line-height: 1.4;
   }
 
   .importPreview .importRemoveBtn {
     flex: 0 0 auto;
     padding: 8px 10px;
-    margin-top: -2px;               /* visually align ✕ with line 1          */
+    margin-top: -2px; /* visually align ✕ with line 1          */
   }
 
   .selectWrapper {
@@ -341,7 +342,7 @@ body {
       align-items: stretch;
     }
 
-    .cardTop>.btn {
+    .cardTop > .btn {
       width: 100%;
     }
 
@@ -350,8 +351,8 @@ body {
       max-width: none;
     }
 
-    .cardControls>.btn,
-    .cardControls>label.btn {
+    .cardControls > .btn,
+    .cardControls > label.btn {
       flex: 1 1 0;
       min-width: 0;
     }
@@ -541,7 +542,7 @@ body {
       flex-direction: column;
       gap: 8px;
 
-      >label,
+      > label,
       .labelRow label {
         font-size: 14px;
         font-weight: 500;
@@ -609,7 +610,7 @@ body {
             gap: 8px;
           }
 
-          >span {
+          > span {
             font-size: 12px;
             color: #9ca3af;
           }
